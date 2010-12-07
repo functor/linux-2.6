@@ -1,3 +1,12 @@
+From 8c48fbeaf216b37de60db872f9950404fa0b3f3b Mon Sep 17 00:00:00 2001
+From: S.Çağlar Onur <caglar@cs.princeton.edu>
+Date: Tue, 7 Dec 2010 11:10:01 -0500
+Subject: [PATCH] linux-2.6-640-netlink-audit-hack.patch
+
+---
+ net/netlink/af_netlink.c |    5 +++++
+ 1 files changed, 5 insertions(+), 0 deletions(-)
+
 diff --git a/net/netlink/af_netlink.c b/net/netlink/af_netlink.c
 index 1438a1d..ce66270 100644
 --- a/net/netlink/af_netlink.c
@@ -14,3 +23,6 @@ index 1438a1d..ce66270 100644
  	netlink_lock_table();
  #ifdef CONFIG_MODULES
  	if (!nl_table[protocol].registered) {
+-- 
+1.5.4.3
+

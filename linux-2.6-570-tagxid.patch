@@ -1,3 +1,15 @@
+From 4b2f69dc4b287b20c5a9f37110b369946718e2e2 Mon Sep 17 00:00:00 2001
+From: S.Çağlar Onur <caglar@cs.princeton.edu>
+Date: Tue, 7 Dec 2010 11:08:52 -0500
+Subject: [PATCH] linux-2.6-570-tagxid.patch
+
+---
+ fs/ext2/super.c  |    1 +
+ fs/ext3/super.c  |    1 +
+ fs/ext4/super.c  |    1 +
+ fs/ocfs2/super.c |    1 +
+ 4 files changed, 4 insertions(+), 0 deletions(-)
+
 diff --git a/fs/ext2/super.c b/fs/ext2/super.c
 index 4e77a8d..761112e 100644
 --- a/fs/ext2/super.c
@@ -11,11 +23,11 @@ index 4e77a8d..761112e 100644
  	{Opt_tagid, "tagid=%u"},
  	{Opt_grpquota, "grpquota"},
 diff --git a/fs/ext3/super.c b/fs/ext3/super.c
-index bb3eccb..8cac842 100644
+index 7731229..2adda9b 100644
 --- a/fs/ext3/super.c
 +++ b/fs/ext3/super.c
-@@ -857,6 +857,7 @@ static const match_table_t tokens = {
- 	{Opt_barrier, "barrier=%u"},
+@@ -865,6 +865,7 @@ static const match_table_t tokens = {
+ 	{Opt_nobarrier, "nobarrier"},
  	{Opt_resize, "resize"},
  	{Opt_tag, "tag"},
 +	{Opt_tag, "tagxid"},
@@ -23,10 +35,10 @@ index bb3eccb..8cac842 100644
  	{Opt_tagid, "tagid=%u"},
  	{Opt_err, NULL},
 diff --git a/fs/ext4/super.c b/fs/ext4/super.c
-index 8fca488..fb00364 100644
+index ae8a8ed..c80f173 100644
 --- a/fs/ext4/super.c
 +++ b/fs/ext4/super.c
-@@ -1179,6 +1179,7 @@ static const match_table_t tokens = {
+@@ -1217,6 +1217,7 @@ static const match_table_t tokens = {
  	{Opt_discard, "discard"},
  	{Opt_nodiscard, "nodiscard"},
  	{Opt_tag, "tag"},
@@ -46,3 +58,6 @@ index fa2baad..e28e02f 100644
  	{Opt_notag, "notag"},
  	{Opt_tagid, "tagid=%u"},
  	{Opt_err, NULL}
+-- 
+1.5.4.3
+

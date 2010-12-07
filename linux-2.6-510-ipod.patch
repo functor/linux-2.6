@@ -1,5 +1,19 @@
+From 8d91b0f47840b3472e3ca973c439f07b202f2806 Mon Sep 17 00:00:00 2001
+From: S.Çağlar Onur <caglar@cs.princeton.edu>
+Date: Tue, 7 Dec 2010 11:05:48 -0500
+Subject: [PATCH] linux-2.6-510-ipod.patch
+
+---
+ include/linux/sysctl.h     |    7 ++++
+ include/net/icmp.h         |    8 +++++
+ net/ipv4/Kconfig           |   11 ++++++
+ net/ipv4/icmp.c            |   68 +++++++++++++++++++++++++++++++++++++++++
+ net/ipv4/sysctl_net_ipv4.c |   43 ++++++++++++++++++++++++++
+ net/ipv4/udp.c             |   73 ++++++++++++++++++++++++++++++++++++++++++++
+ 6 files changed, 210 insertions(+), 0 deletions(-)
+
 diff --git a/include/linux/sysctl.h b/include/linux/sysctl.h
-index 0344615..dc0f0d8 100644
+index ad17717..246538d 100644
 --- a/include/linux/sysctl.h
 +++ b/include/linux/sysctl.h
 @@ -436,6 +436,13 @@ enum
@@ -143,10 +157,10 @@ index 5bc13fe..5324406 100644
  		.handler = icmp_discard,
  		.error = 1,
 diff --git a/net/ipv4/sysctl_net_ipv4.c b/net/ipv4/sysctl_net_ipv4.c
-index 2dcf04d..2bcd5df 100644
+index 3aab5bd..f1052a3 100644
 --- a/net/ipv4/sysctl_net_ipv4.c
 +++ b/net/ipv4/sysctl_net_ipv4.c
-@@ -770,6 +770,49 @@ static struct ctl_table ipv4_net_table[] = {
+@@ -777,6 +777,49 @@ static struct ctl_table ipv4_net_table[] = {
  		.mode		= 0644,
  		.proc_handler	= proc_dointvec
  	},
@@ -197,10 +211,10 @@ index 2dcf04d..2bcd5df 100644
  		.ctl_name	= NET_IPV4_ICMP_ERRORS_USE_INBOUND_IFADDR,
  		.procname	= "icmp_errors_use_inbound_ifaddr",
 diff --git a/net/ipv4/udp.c b/net/ipv4/udp.c
-index 59f9451..6bcf1f1 100644
+index 5c85d37..f98b6a6 100644
 --- a/net/ipv4/udp.c
 +++ b/net/ipv4/udp.c
-@@ -1282,6 +1282,75 @@ static inline int udp4_csum_init(struct sk_buff *skb, struct udphdr *uh,
+@@ -1283,6 +1283,75 @@ static inline int udp4_csum_init(struct sk_buff *skb, struct udphdr *uh,
  	return 0;
  }
  
@@ -276,7 +290,7 @@ index 59f9451..6bcf1f1 100644
  /*
   *	All we need to do is get the socket, and then do a checksum.
   */
-@@ -1324,6 +1393,10 @@ int __udp4_lib_rcv(struct sk_buff *skb, struct udp_table *udptable,
+@@ -1325,6 +1394,10 @@ int __udp4_lib_rcv(struct sk_buff *skb, struct udp_table *udptable,
  		return __udp4_lib_mcast_deliver(net, skb, uh,
  				saddr, daddr, udptable);
  
@@ -287,3 +301,6 @@ index 59f9451..6bcf1f1 100644
  	sk = __udp4_lib_lookup_skb(skb, uh->source, uh->dest, udptable);
  
  	if (sk != NULL) {
+-- 
+1.5.4.3
+

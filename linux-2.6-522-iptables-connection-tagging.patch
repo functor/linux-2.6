@@ -1,3 +1,20 @@
+From 1d251758b9daeb60cc5afa5ce5aa725cf5ca84a7 Mon Sep 17 00:00:00 2001
+From: S.Çağlar Onur <caglar@cs.princeton.edu>
+Date: Tue, 7 Dec 2010 11:06:57 -0500
+Subject: [PATCH] linux-2.6-522-iptables-connection-tagging.patch
+
+---
+ include/linux/netfilter/xt_SETXID.h  |   13 ++
+ include/net/netfilter/nf_conntrack.h |    3 +
+ net/netfilter/Kconfig                |    7 +
+ net/netfilter/Makefile               |    1 +
+ net/netfilter/nf_conntrack_core.c    |    3 +
+ net/netfilter/xt_MARK.c              |  267 +++++++++++++++++++++++++++++++++-
+ net/netfilter/xt_SETXID.c            |   77 ++++++++++
+ 7 files changed, 364 insertions(+), 7 deletions(-)
+ create mode 100644 include/linux/netfilter/xt_SETXID.h
+ create mode 100644 net/netfilter/xt_SETXID.c
+
 diff --git a/include/linux/netfilter/xt_SETXID.h b/include/linux/netfilter/xt_SETXID.h
 new file mode 100644
 index 0000000..235b9d6
@@ -32,10 +49,10 @@ index 5cf7270..95a5fde 100644
  	struct nf_ct_ext *ext;
  #ifdef CONFIG_NET_NS
 diff --git a/net/netfilter/Kconfig b/net/netfilter/Kconfig
-index 634d14a..a2872f5 100644
+index 62cf66b..cb15f4a 100644
 --- a/net/netfilter/Kconfig
 +++ b/net/netfilter/Kconfig
-@@ -543,6 +543,13 @@ config NETFILTER_XT_MATCH_CLUSTER
+@@ -537,6 +537,13 @@ config NETFILTER_XT_MATCH_CLUSTER
  	  If you say Y or M here, try `iptables -m cluster --help` for
  	  more information.
  
@@ -50,7 +67,7 @@ index 634d14a..a2872f5 100644
  	tristate  '"comment" match support'
  	depends on NETFILTER_ADVANCED
 diff --git a/net/netfilter/Makefile b/net/netfilter/Makefile
-index 49f62ee..820655e 100644
+index b9815a9..25e24c1 100644
 --- a/net/netfilter/Makefile
 +++ b/net/netfilter/Makefile
 @@ -41,6 +41,7 @@ obj-$(CONFIG_NETFILTER_TPROXY) += nf_tproxy_core.o
@@ -58,14 +75,14 @@ index 49f62ee..820655e 100644
  
  # targets
 +obj-$(CONFIG_NETFILTER_XT_TARGET_SETXID) += xt_SETXID.o
+ obj-$(CONFIG_NETFILTER_XT_TARGET_CHECKSUM) += xt_CHECKSUM.o
  obj-$(CONFIG_NETFILTER_XT_TARGET_CLASSIFY) += xt_CLASSIFY.o
  obj-$(CONFIG_NETFILTER_XT_TARGET_CONNMARK) += xt_CONNMARK.o
- obj-$(CONFIG_NETFILTER_XT_TARGET_CONNSECMARK) += xt_CONNSECMARK.o
 diff --git a/net/netfilter/nf_conntrack_core.c b/net/netfilter/nf_conntrack_core.c
-index 1e1df20..144e131 100644
+index 1374179..0f9464c 100644
 --- a/net/netfilter/nf_conntrack_core.c
 +++ b/net/netfilter/nf_conntrack_core.c
-@@ -673,6 +673,9 @@ init_conntrack(struct net *net,
+@@ -677,6 +677,9 @@ init_conntrack(struct net *net,
  	hlist_nulls_add_head_rcu(&ct->tuplehash[IP_CT_DIR_ORIGINAL].hnnode,
  		       &net->ct.unconfirmed);
  
@@ -453,3 +470,6 @@ index 0000000..f8553c5
 +
 +module_init(init);
 +module_exit(fini);
+-- 
+1.5.4.3
+

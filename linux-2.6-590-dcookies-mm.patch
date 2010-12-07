@@ -1,3 +1,13 @@
+From d8e2bd85a3188b65ae8a3a82cc6dade218f69aa0 Mon Sep 17 00:00:00 2001
+From: S.Çağlar Onur <caglar@cs.princeton.edu>
+Date: Tue, 7 Dec 2010 11:09:20 -0500
+Subject: [PATCH] linux-2.6-590-dcookies-mm.patch
+
+---
+ fs/dcookies.c            |   97 +++++++++++++++++++++++++++++++++++++--------
+ include/linux/dcookies.h |   21 ++++++++++
+ 2 files changed, 100 insertions(+), 18 deletions(-)
+
 diff --git a/fs/dcookies.c b/fs/dcookies.c
 index a21cabd..1e95c94 100644
 --- a/fs/dcookies.c
@@ -244,3 +254,6 @@ index 24c806f..3c1d2b2 100644
  #else
  
  static inline struct dcookie_user * dcookie_register(void)
+-- 
+1.5.4.3
+

@@ -1,3 +1,12 @@
+From 799a8113aabe796f7e0ca44c93f3e506444ac88e Mon Sep 17 00:00:00 2001
+From: S.Çağlar Onur <caglar@cs.princeton.edu>
+Date: Tue, 7 Dec 2010 11:10:42 -0500
+Subject: [PATCH] linux-2.6-680-htb-hysteresis-tso.patch
+
+---
+ net/sched/sch_htb.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
 diff --git a/net/sched/sch_htb.c b/net/sched/sch_htb.c
 index 85acab9..2de93ee 100644
 --- a/net/sched/sch_htb.c
@@ -11,3 +20,6 @@ index 85acab9..2de93ee 100644
  #define HTB_VER 0x30011		/* major must be matched with number suplied by TC as version */
  
  #if HTB_VER >> 16 != TC_HTB_PROTOVER
+-- 
+1.5.4.3
+

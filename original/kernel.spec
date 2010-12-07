@@ -6,6 +6,7 @@ Summary: The Linux kernel
 # and/or a kernel built from an rc or git snapshot, released_kernel should
 # be 0.
 %define released_kernel 1
+%define dist .el6
 
 # Versions of various parts
 
@@ -18,7 +19,7 @@ Summary: The Linux kernel
 
 %define rhel 1
 %if %{rhel}
-%define distro_build 19
+%define distro_build 71.7.1
 %define signmodules 1
 %else
 # fedora_build defines which build revision of this kernel version we're
@@ -33,7 +34,7 @@ Summary: The Linux kernel
 # Don't stare at the awk too long, you'll go blind.
 %define fedora_cvs_origin   1462
 %define fedora_cvs_revision() %2
-%global distro_build %(echo %{fedora_cvs_origin}.%{fedora_cvs_revision $Revision: 1.1532 $} | awk -F . '{ OFS = "."; ORS = ""; print $3 - $1 ; i = 4 ; OFS = ""; while (i <= NF) { print ".", $i ; i++} }')
+%global distro_build %(echo %{fedora_cvs_origin}.%{fedora_cvs_revision $Revision: 1.18.2.7 $} | awk -F . '{ OFS = "."; ORS = ""; print $3 - $1 ; i = 4 ; OFS = ""; while (i <= NF) { print ".", $i ; i++} }')
 %define distro_build %{fedora_build}
 %define signmodules 0
 %endif
@@ -99,7 +100,7 @@ Summary: The Linux kernel
 # kernel-headers
 %define with_headers   %{?_without_headers:   0} %{?!_without_headers:   1}
 # kernel-firmware
-%define with_firmware  %{?_with_firmware:     0} %{?!_with_firmware:     1}
+%define with_firmware  %{?_with_firmware:     1} %{?!_with_firmware:     0}
 # tools/perf
 %define with_perftool  %{?_without_perftool:  0} %{?!_without_perftool:  1}
 # perf noarch subpkg
@@ -112,8 +113,6 @@ Summary: The Linux kernel
 %define with_vdso_install %{?_without_vdso_install: 0} %{?!_without_vdso_install: 1}
 # Use dracut instead of mkinitrd for initrd image generation
 %define with_dracut       %{?_without_dracut:       0} %{?!_without_dracut:       1}
-# Temporary variant: framepointer
-%define with_framepointer	%{?_with_framepointer:	1} %{?!_with_framepointer:	0}
 
 # Build the kernel-doc package, but don't fail the build if it botches.
 # Here "true" means "continue" and "false" means "fail the build".
@@ -145,10 +144,6 @@ Summary: The Linux kernel
 # See also 'make debug' and 'make release'.
 %define debugbuildsenabled 1
 
-# Want to build a vanilla kernel build without any non-upstream patches?
-# (well, almost none, we need nonintconfig for build purposes). Default to 0 (off).
-%define with_vanilla %{?_with_vanilla: 1} %{?!_with_vanilla: 0}
-
 # pkg_release is what we'll fill in for the rpm Release: field
 %if 0%{?released_kernel}
 
@@ -175,7 +170,7 @@ Summary: The Linux kernel
 %endif
 
 # The kernel tarball/base version
-%define kversion 2.6.%{base_sublevel}
+%define kversion 2.6.32-71.7.1.el6
 
 %define make_target bzImage
 
@@ -184,10 +179,6 @@ Summary: The Linux kernel
 
 %if 0%{!?nopatches:1}
 %define nopatches 0
-%endif
-
-%if %{with_vanilla}
-%define nopatches 1
 %endif
 
 %if %{nopatches}
@@ -245,18 +236,13 @@ Summary: The Linux kernel
 %define with_xen 0
 %define with_kdump 0
 %define with_perftool 0
-%define with_framepointer 0
 %endif
 
 %define all_x86 i386 i686
 
-%ifnarch %{all_x86} x86_64
-%define with_framepointer 0
-%endif
-
 %if %{with_vdso_install}
 # These arches install vdso/ directories.
-%define vdso_arches %{all_x86} x86_64 ppc ppc64
+%define vdso_arches %{all_x86} x86_64 ppc ppc64 s390 s390x
 %endif
 
 # Overrides for generic default options
@@ -484,7 +470,7 @@ Summary: The Linux kernel
 Provides: kernel = %{rpmversion}-%{pkg_release}\
 Provides: kernel-%{_target_cpu} = %{rpmversion}-%{pkg_release}%{?1:.%{1}}\
 Provides: kernel-drm = 4.3.0\
-Provides: kernel-drm-nouveau = 15\
+Provides: kernel-drm-nouveau = 16\
 Provides: kernel-modeset = 1\
 Provides: kernel-uname-r = %{KVERREL}%{?1:.%{1}}\
 Requires(pre): %{kernel_prereq}\
@@ -526,7 +512,7 @@ Obsoletes: kernel-smp
 BuildRequires: module-init-tools, patch >= 2.5.4, bash >= 2.03, sh-utils, tar
 BuildRequires: bzip2, findutils, gzip, m4, perl, make >= 3.78, diffutils, gawk
 BuildRequires: gcc >= 3.4.2, binutils >= 2.12, redhat-rpm-config
-BuildRequires: net-tools, patchutils
+BuildRequires: net-tools, patchutils, rpm-build >= 4.8.0-7
 %if %{with_doc}
 BuildRequires: xmlto
 BuildRequires: asciidoc
@@ -555,11 +541,10 @@ BuildConflicts: rhbuildsys(DiskFree) < 7Gb
 
 %if %{fancy_debuginfo}
 # Fancy new debuginfo generation introduced in Fedora 8.
-BuildRequires: rpm-build >= 4.4.2.1-4
 %define debuginfo_args --strict-build-id
 %endif
 
-Source0: ftp://ftp.kernel.org/pub/linux/kernel/v2.6/linux-%{kversion}.tar.bz2
+Source0: linux-2.6.32-71.7.1.el6.tar.bz2
 
 Source1: Makefile.common
 
@@ -571,6 +556,7 @@ Source3: ftp://ftp.kernel.org/pub/linux/kernel/v2.6/testing/incr/patch-2.6.%{ups
 %endif
 
 Source11: genkey
+Source13: perf-archive
 Source14: find-provides
 Source15: merge.pl
 Source16: perf
@@ -591,1267 +577,35 @@ Source52: config-generic
 Source53: config-x86-generic-rhel
 Source54: config-s390x-generic-rhel
 Source55: config-x86-generic
-Source56: config-s390x-rhel
-Source57: config-powerpc64-kdump
-Source58: config-nodebug
-Source59: config-s390x
-Source60: config-powerpc-generic-rhel
-Source61: config-ia64-generic-rhel
-Source62: config-s390x-kdump
-Source63: config-nodebug-rhel
-Source64: config-powerpc-generic
-Source65: config-framepointer
-Source66: config-i686-rhel
-Source67: config-powerpc64-rhel
-Source68: config-debug
-Source69: config-x86_64-generic
-Source70: config-x86_64-generic-rhel
-Source71: config-debug-rhel
-Source72: config-generic-rhel
-Source73: config-powerpc64
-
-Patch: Fedora-redhat-introduce-nonint_oldconfig-target.patch
-Patch1: Fedora-build-introduce-AFTER_LINK-variable.patch
-Patch2: Fedora-utrace-introduce-utrace-implementation.patch
-Patch3: Fedora-hwmon-add-VIA-hwmon-temperature-sensor-support.patch
-Patch4: Fedora-powerpc-add-modalias_show-operation.patch
-Patch5: Fedora-execshield-introduce-execshield.patch
-Patch6: Fedora-nfsd4-proots.patch
-Patch7: Fedora-nfs-make-nfs4-callback-hidden.patch
-Patch8: Fedora-usb-Allow-drivers-to-enable-USB-autosuspend-on-a-per-device-basis.patch
-Patch9: Fedora-usb-enable-autosuspend-by-default-on-qcserial.patch
-Patch10: Fedora-usb-enable-autosuspend-on-UVC-by-default.patch
-Patch11: Fedora-acpi-Disable-brightness-switch-by-default.patch
-Patch12: Fedora-acpi-Disable-firmware-video-brightness-change-by-default.patch
-Patch13: Fedora-debug-print-common-struct-sizes-at-boot-time.patch
-Patch14: Fedora-x86-add-option-to-control-the-NMI-watchdog-timeout.patch
-Patch15: Fedora-debug-display-tainted-information-on-other-places.patch
-Patch16: Fedora-debug-add-calls-to-print_tainted-on-spinlock-functions.patch
-Patch17: Fedora-debug-add-would_have_oomkilled-procfs-ctl.patch
-Patch18: Fedora-debug-always-inline-kzalloc.patch
-Patch19: Fedora-pci-add-config-option-to-control-the-default-state-of-PCI-MSI-interrupts.patch
-Patch20: Fedora-pci-sets-PCIE-ASPM-default-policy-to-POWERSAVE.patch
-Patch21: Fedora-sound-disables-hda-beep-by-default.patch
-Patch22: Fedora-sound-hda-intel-prealloc-4mb-dmabuffer.patch
-Patch23: Fedora-input-remove-unwanted-messages-on-spurious-events.patch
-Patch24: Fedora-floppy-remove-the-floppy-pnp-modalias.patch
-Patch25: Fedora-input-remove-pcspkr-modalias.patch
-Patch26: Fedora-serial-Enable-higher-baud-rates-for-16C95x.patch
-Patch27: Fedora-serio-disable-error-messages-when-i8042-isn-t-found.patch
-Patch28: Fedora-pci-silence-some-PCI-resource-allocation-errors.patch
-Patch29: Fedora-fb-disable-fbcon-logo-with-parameter.patch
-Patch30: Fedora-crash-add-crash-driver.patch
-Patch31: Fedora-pci-cacheline-sizing.patch
-Patch32: Fedora-e1000-add-quirk-for-ich9.patch
-Patch33: Fedora-drm-intel-big-hammer.patch
-Patch34: Fedora-acpi-be-less-verbose-about-old-BIOSes.patch
-Patch35: Fedora-rfkill-add-support-to-a-key-to-control-all-radios.patch
-Patch36: redhat-adding-redhat-directory.patch
-Patch37: redhat-Importing-config-options.patch
-Patch38: redhat-s390x-adding-zfcpdump-application-used-by-s390x-kdump-kernel.patch
-Patch39: redhat-Include-FIPS-required-checksum-of-the-kernel-image.patch
-Patch40: redhat-Silence-tagging-messages-by-rh-release.patch
-Patch41: redhat-Disabling-debug-options-for-beta.patch
-Patch42: redhat-kernel-requires-udev-145-11-or-newer.patch
-Patch43: redhat-tagging-2-6-31-50-el6.patch
-Patch44: redhat-updating-lastcommit-for-2-6-31-50.patch
-Patch45: block-get-rid-of-the-WRITE_ODIRECT-flag.patch
-Patch46: block-aio-implement-request-batching.patch
-Patch47: kdump-x86-add-CONFIG_KEXEC_AUTO_RESERVE.patch
-Patch48: kdump-x86-implement-crashkernel-auto.patch
-Patch49: kdump-ia64-add-CONFIG_KEXEC_AUTO_RESERVE.patch
-Patch50: kdump-ia64-implement-crashkernel-auto.patch
-Patch51: kdump-powerpc-add-CONFIG_KEXEC_AUTO_RESERVE.patch
-Patch52: kdump-powerpc-implement-crashkernel-auto.patch
-Patch53: kdump-doc-update-the-kdump-document.patch
-Patch54: kdump-kexec-allow-to-shrink-reserved-memory.patch
-Patch55: kernel-Set-panic_on_oops-to-1.patch
-Patch56: redhat-fix-BZ-and-CVE-info-printing-on-changelog-when-HIDE_REDHAT-is-enabled.patch
-Patch57: redhat-tagging-2-6-31-51-el6.patch
-Patch58: redhat-updating-lastcommit-for-2-6-31-51.patch
-Patch59: redhat-fixing-the-kernel-versions-on-the-SPEC-changelog.patch
-Patch60: redhat-Fix-version-passed-to-update_changelog-sh.patch
-Patch61: mm-Limit-32-bit-x86-systems-to-16GB-and-prevent-panic-on-boot-when-system-has-more-than-30GB.patch
-Patch62: ppc64-Fix-kcrctab_-sections-to-undo-undesireable-relocations-that-break-kdump.patch
-Patch63: net-export-device-speed-and-duplex-via-sysfs.patch
-Patch64: scsi-devinfo-update-for-Hitachi-entries.patch
-Patch65: x86-AMD-Northbridge-Verify-NB-s-node-is-online.patch
-Patch66: redhat-tagging-2-6-32-0-52-el6.patch
-Patch67: redhat-updating-lastcommit-for-2-6-32-0-52.patch
-Patch68: redhat-fix-STAMP-version-on-rh-release-commit-phase.patch
-Patch69: redhat-enable-debug-builds-also-on-s390x-and-ppc64.patch
-Patch70: s390x-fix-build-failure-with-CONFIG_FTRACE_SYSCALLS.patch
-Patch71: procfs-add-ability-to-modify-proc-file-limits-from-outside-a-processes-own-context.patch
-Patch72: modsign-Multiprecision-maths-library.patch
-Patch73: modsign-Add-indications-of-module-ELF-types.patch
-Patch74: modsign-Module-ELF-verifier.patch
-Patch75: modsign-Module-signature-checker-and-key-manager.patch
-Patch76: modsign-Apply-signature-checking-to-modules-on-module-load.patch
-Patch77: modsign-Don-t-include-note-gnu-build-id-in-the-digest.patch
-Patch78: modsign-Enable-module-signing-in-the-RHEL-RPM.patch
-Patch79: net-Add-acession-counts-to-all-datagram-protocols.patch
-Patch80: redhat-tagging-2-6-32-0-53-el6.patch
-Patch81: redhat-updating-lastcommit-for-2-6-32-0-53.patch
-Patch82: redhat-fixing-wrong-bug-number-536759-536769.patch
-Patch83: redhat-adding-top-makefile-to-enable-rh-targets.patch
-Patch84: redhat-add-temporary-framepointer-variant.patch
-Patch85: redhat-add-rh-key-target-to-Makefile.patch
-Patch86: infiniband-Rewrite-SG-handling-for-RDMA-logic.patch
-Patch87: x86-panic-if-AMD-cpu_khz-is-wrong.patch
-Patch88: x86-Enable-CONFIG_SPARSE_IRQ.patch
-Patch89: edac-amd64_edac-disabling-temporarily.patch
-Patch90: redhat-tagging-2-6-32-0-54-el6.patch
-Patch91: redhat-updating-lastcommit-for-2-6-32-0-54.patch
-Patch92: redhat-create-patches-sh-use-first-parent-to-use-the-right-branch-history.patch
-Patch93: redhat-Rebasing-to-kernel-2-6-32.patch
-Patch94: redhat-updating-lastcommit-for-2-6-32-1.patch
-Patch95: redhat-introduce-rh-kernel-debug-target.patch
-Patch96: redhat-update-build-targets-in-Makefile.patch
-Patch97: redhat-include-missing-System-map-file-for-debug-only-builds.patch
-Patch98: Fedora-updating-linux-2-6-execshield-patch-2-6-32-8-fc13-reference.patch
-Patch99: Fedora-updating-patch-linux-2-6-nfsd4-proots-patch-2-6-32-8-fc13-reference.patch
-Patch100: Fedora-intel-iommu-backport.patch
-Patch101: Fedora-ath9k-backports.patch
-Patch102: Fedora-KVM-allow-userspace-to-adjust-kvmclock-offset.patch
-Patch103: Fedora-drm-radeon-fixes.patch
-Patch104: Fedora-drm-radeon-dp-support.patch
-Patch105: Fedora-drm-nouveau-fixes.patch
-Patch106: Fedora-drm-i915-Fix-sync-to-vblank-when-VGA-output-is-turned-off.patch
-Patch107: Fedora-agp-clear-GTT-on-intel.patch
-Patch108: Fedora-ext4-Fix-insuficient-checks-in-EXT4_IOC_MOVE_EXT.patch
-Patch109: Fedora-perf-Don-t-free-perf_mmap_data-until-work-has-been-done.patch
-Patch110: redhat-updating-config-files-based-on-current-requests-12-10.patch
-Patch111: redhat-Config-updates-12-15.patch
-Patch112: block-revert-cfq-iosched-limit-coop-preemption.patch
-Patch113: block-CFQ-is-more-than-a-desktop-scheduler.patch
-Patch114: block-cfq-calculate-the-seek_mean-per-cfq_queue-not-per-cfq_io_context.patch
-Patch115: block-cfq-merge-cooperating-cfq_queues.patch
-Patch116: block-cfq-change-the-meaning-of-the-cfqq_coop-flag.patch
-Patch117: block-cfq-break-apart-merged-cfqqs-if-they-stop-cooperating.patch
-Patch118: block-cfq-iosched-improve-hw_tag-detection.patch
-Patch119: block-cfq-iosched-adapt-slice-to-number-of-processes-doing-I-O.patch
-Patch120: block-cfq-iosched-preparation-to-handle-multiple-service-trees.patch
-Patch121: block-cfq-iosched-reimplement-priorities-using-different-service-trees.patch
-Patch122: block-cfq-iosched-enable-idling-for-last-queue-on-priority-class.patch
-Patch123: block-cfq-iosched-fairness-for-sync-no-idle-queues.patch
-Patch124: block-cfq-iosched-fix-style-issue-in-cfq_get_avg_queues.patch
-Patch125: block-blkdev-flush-disk-cache-on-fsync.patch
-Patch126: block-cfq-iosched-simplify-prio-unboost-code.patch
-Patch127: block-cfq-iosched-fix-next_rq-computation.patch
-Patch128: block-Expose-discard-granularity.patch
-Patch129: block-partitions-use-sector-size-for-EFI-GPT.patch
-Patch130: block-partitions-read-whole-sector-with-EFI-GPT-header.patch
-Patch131: block-cfq-Make-use-of-service-count-to-estimate-the-rb_key-offset.patch
-Patch132: block-cfq-iosched-cleanup-unreachable-code.patch
-Patch133: block-cfq-iosched-fix-ncq-detection-code.patch
-Patch134: block-cfq-iosched-fix-no-idle-preemption-logic.patch
-Patch135: block-cfq-iosched-idling-on-deep-seeky-sync-queues.patch
-Patch136: block-cfq-iosched-fix-corner-cases-in-idling-logic.patch
-Patch137: block-Revert-cfq-Make-use-of-service-count-to-estimate-the-rb_key-offset.patch
-Patch138: block-Allow-devices-to-indicate-whether-discarded-blocks-are-zeroed.patch
-Patch139: block-cfq-iosched-no-dispatch-limit-for-single-queue.patch
-Patch140: block-blkio-Set-must_dispatch-only-if-we-decided-to-not-dispatch-the-request.patch
-Patch141: block-blkio-Introduce-the-notion-of-cfq-groups.patch
-Patch142: block-blkio-Implement-macro-to-traverse-each-service-tree-in-group.patch
-Patch143: block-blkio-Keep-queue-on-service-tree-until-we-expire-it.patch
-Patch144: block-blkio-Introduce-the-root-service-tree-for-cfq-groups.patch
-Patch145: block-blkio-Introduce-blkio-controller-cgroup-interface.patch
-Patch146: block-blkio-Introduce-per-cfq-group-weights-and-vdisktime-calculations.patch
-Patch147: block-blkio-Implement-per-cfq-group-latency-target-and-busy-queue-avg.patch
-Patch148: block-blkio-Group-time-used-accounting-and-workload-context-save-restore.patch
-Patch149: block-blkio-Dynamic-cfq-group-creation-based-on-cgroup-tasks-belongs-to.patch
-Patch150: block-blkio-Take-care-of-cgroup-deletion-and-cfq-group-reference-counting.patch
-Patch151: block-blkio-Some-debugging-aids-for-CFQ.patch
-Patch152: block-blkio-Export-disk-time-and-sectors-used-by-a-group-to-user-space.patch
-Patch153: block-blkio-Provide-some-isolation-between-groups.patch
-Patch154: block-blkio-Drop-the-reference-to-queue-once-the-task-changes-cgroup.patch
-Patch155: block-blkio-Propagate-cgroup-weight-updation-to-cfq-groups.patch
-Patch156: block-blkio-Wait-for-cfq-queue-to-get-backlogged-if-group-is-empty.patch
-Patch157: block-blkio-Determine-async-workload-length-based-on-total-number-of-queues.patch
-Patch158: block-blkio-Implement-group_isolation-tunable.patch
-Patch159: block-blkio-Wait-on-sync-noidle-queue-even-if-rq_noidle-1.patch
-Patch160: block-blkio-Documentation.patch
-Patch161: block-cfq-iosched-fix-compile-problem-with-CONFIG_CGROUP.patch
-Patch162: block-cfq-iosched-move-IO-controller-declerations-to-a-header-file.patch
-Patch163: block-io-controller-quick-fix-for-blk-cgroup-and-modular-CFQ.patch
-Patch164: block-cfq-iosched-make-nonrot-check-logic-consistent.patch
-Patch165: block-blkio-Export-some-symbols-from-blkio-as-its-user-CFQ-can-be-a-module.patch
-Patch166: block-blkio-Implement-dynamic-io-controlling-policy-registration.patch
-Patch167: block-blkio-Allow-CFQ-group-IO-scheduling-even-when-CFQ-is-a-module.patch
-Patch168: block-cfq-iosched-use-call_rcu-instead-of-doing-grace-period-stall-on-queue-exit.patch
-Patch169: block-include-linux-err-h-to-use-ERR_PTR.patch
-Patch170: block-cfq-iosched-Do-not-access-cfqq-after-freeing-it.patch
-Patch171: block-dio-fix-performance-regression.patch
-Patch172: block-Add-support-for-the-ATA-TRIM-command-in-libata.patch
-Patch173: scsi-Add-missing-command-definitions.patch
-Patch174: scsi-scsi_debug-Thin-provisioning-support.patch
-Patch175: scsi-sd-WRITE-SAME-16-UNMAP-support.patch
-Patch176: scsi-Correctly-handle-thin-provisioning-write-error.patch
-Patch177: libata-Report-zeroed-read-after-Trim-and-max-discard-size.patch
-Patch178: libata-Clarify-ata_set_lba_range_entries-function.patch
-Patch179: block-config-enable-CONFIG_BLK_CGROUP.patch
-Patch180: block-config-enable-CONFIG_BLK_DEV_INTEGRITY.patch
-Patch181: redhat-tagging-2-6-32-2-el6.patch
-Patch182: redhat-updating-lastcommit-for-2-6-32-2.patch
-Patch183: redhat-force-to-run-rh-key-target-when-compiling-the-kernel-locally-without-RPM.patch
-Patch184: redhat-run-rngd-on-rh-key-to-speed-up-key-generation.patch
-Patch185: redhat-make-the-documentation-build-j1.patch
-Patch186: redhat-remove-unused-config-file-config-powerpc64-generic-rhel.patch
-Patch187: redhat-fix-problem-when-using-other-rh-targets.patch
-Patch188: redhat-reverting-makefile-magic.patch
-Patch189: redhat-remove-gcc-bug-workaround.patch
-Patch190: redhat-run-rh-key-when-the-GPG-keys-aren-t-present.patch
-Patch191: nfs-convert-proto-option-to-use-netids-rather-than-a-protoname.patch
-Patch192: scsi-fix-dma-handling-when-using-virtual-hosts.patch
-Patch193: dm-core-and-mpath-changes-from-2-6-33.patch
-Patch194: dm-raid1-changes-from-2-6-33.patch
-Patch195: dm-crypt-changes-from-2-6-33.patch
-Patch196: dm-snapshot-changes-from-2-6-33.patch
-Patch197: dm-snapshot-merge-support-from-2-6-33.patch
-Patch198: redhat-add-vhost-to-config-generic-rhel.patch
-Patch199: virt-tun-export-underlying-socket.patch
-Patch200: virt-mm-export-use_mm-unuse_mm-to-modules.patch
-Patch201: virt-vhost_net-a-kernel-level-virtio-server.patch
-Patch202: virt-vhost-add-missing-architectures.patch
-Patch203: s390-kernel-clear-high-order-bits-after-switching-to-64-bit-mode.patch
-Patch204: s390-zcrypt-Do-not-simultaneously-schedule-hrtimer.patch
-Patch205: s390-dasd-support-DIAG-access-for-read-only-devices.patch
-Patch206: s390-kernel-fix-dump-indicator.patch
-Patch207: s390-kernel-performance-counter-fix-and-page-fault-optimization.patch
-Patch208: s390-zcrypt-initialize-ap_messages-for-cex3-exploitation.patch
-Patch209: s390-zcrypt-special-command-support-for-cex3-exploitation.patch
-Patch210: s390-zcrypt-add-support-for-cex3-device-types.patch
-Patch211: s390-zcrypt-use-definitions-for-cex3.patch
-Patch212: s390-zcrypt-adjust-speed-rating-between-cex2-and-pcixcc.patch
-Patch213: s390-zcrypt-adjust-speed-rating-of-cex3-adapters.patch
-Patch214: s390-OSA-QDIO-data-connection-isolation.patch
-Patch215: redhat-Build-in-standard-PCI-hotplug-support.patch
-Patch216: pci-pciehp-Provide-an-option-to-disable-native-PCIe-hotplug.patch
-Patch217: modsign-Don-t-check-e_entry-in-ELF-header.patch
-Patch218: redhat-fixing-lastcommit-contents-for-2-6-32-2-el6.patch
-Patch219: redhat-tagging-2-6-32-3-el6.patch
-Patch220: redhat-updating-lastcommit-for-2-6-32-3.patch
-Patch221: misc-Revert-utrace-introduce-utrace-implementation.patch
-Patch222: ptrace-cleanup-ptrace_init_task-ptrace_link-path.patch
-Patch223: ptrace-copy_process-should-disable-stepping.patch
-Patch224: ptrace-introduce-user_single_step_siginfo-helper.patch
-Patch225: ptrace-powerpc-implement-user_single_step_siginfo.patch
-Patch226: ptrace-change-tracehook_report_syscall_exit-to-handle-stepping.patch
-Patch227: ptrace-x86-implement-user_single_step_siginfo.patch
-Patch228: ptrace-x86-change-syscall_trace_leave-to-rely-on-tracehook-when-stepping.patch
-Patch229: signals-check-group_stop_count-after-tracehook_get_signal.patch
-Patch230: tracehooks-kill-some-PT_PTRACED-checks.patch
-Patch231: tracehooks-check-PT_PTRACED-before-reporting-the-single-step.patch
-Patch232: ptrace_signal-check-PT_PTRACED-before-reporting-a-signal.patch
-Patch233: ptrace-export-__ptrace_detach-and-do_notify_parent_cldstop.patch
-Patch234: ptrace-reorder-the-code-in-kernel-ptrace-c.patch
-Patch235: utrace-implement-utrace-ptrace.patch
-Patch236: utrace-utrace-core.patch
-Patch237: sound-ALSA-HDA-driver-update-2009-12-15.patch
-Patch238: s390-dasd-enable-prefix-independent-of-pav-support.patch
-Patch239: s390-dasd-remove-strings-from-s390dbf.patch
-Patch240: s390-dasd-let-device-initialization-wait-for-LCU-setup.patch
-Patch241: redhat-kernel-enable-hibernation-support-on-s390x.patch
-Patch242: s390-iucv-add-work_queue-cleanup-for-suspend.patch
-Patch243: s390-cmm-free-pages-on-hibernate.patch
-Patch244: s390-ctcm-suspend-has-to-wait-for-outstanding-I-O.patch
-Patch245: s390-zfcp-Don-t-fail-SCSI-commands-when-transitioning-to-blocked-fc_rport.patch
-Patch246: s390-zfcp-Assign-scheduled-work-to-driver-queue.patch
-Patch247: s390-zfcp-fix-ELS-ADISC-handling-to-prevent-QDIO-errors.patch
-Patch248: s390-zfcp-improve-FSF-error-reporting.patch
-Patch249: scsi-scsi_transport_fc-Introduce-helper-function-for-blocking-scsi_eh.patch
-Patch250: s390-zfcp-Block-SCSI-EH-thread-for-rport-state-BLOCKED.patch
-Patch251: uv-x86-SGI-UV-Fix-BAU-initialization.patch
-Patch252: uv-x86-function-to-translate-from-gpa-socket_paddr.patch
-Patch253: uv-x86-introduce-uv_gpa_is_mmr.patch
-Patch254: uv-x86-RTC-Fix-early-expiry-handling.patch
-Patch255: uv-x86-RTC-Add-clocksource-only-boot-option.patch
-Patch256: uv-x86-RTC-Clean-up-error-handling.patch
-Patch257: uv-gru-function-to-generate-chipset-IPI-values.patch
-Patch258: uv-x86-SGI-Map-low-MMR-ranges.patch
-Patch259: xen-wait-up-to-5-minutes-for-device-connetion-and-fix-fallout.patch
-Patch260: xen-support-MAXSMP.patch
-Patch261: mm-move-inc_zone_page_state-NR_ISOLATED-to-just-isolated-place.patch
-Patch262: mm-swap_info-private-to-swapfile-c.patch
-Patch263: mm-swap_info-change-to-array-of-pointers.patch
-Patch264: mm-swap_info-include-first_swap_extent.patch
-Patch265: mm-swap_info-miscellaneous-minor-cleanups.patch
-Patch266: mm-swap_info-SWAP_HAS_CACHE-cleanups.patch
-Patch267: mm-swap_info-swap_map-of-chars-not-shorts.patch
-Patch268: mm-swap_info-swap-count-continuations.patch
-Patch269: mm-swap_info-note-SWAP_MAP_SHMEM.patch
-Patch270: mm-define-PAGE_MAPPING_FLAGS.patch
-Patch271: mm-mlocking-in-try_to_unmap_one.patch
-Patch272: mm-CONFIG_MMU-for-PG_mlocked.patch
-Patch273: mm-pass-address-down-to-rmap-ones.patch
-Patch274: mm-vmscan-have-kswapd-sleep-for-a-short-interval-and-double-check-it-should-be-asleep.patch
-Patch275: mm-vmscan-stop-kswapd-waiting-on-congestion-when-the-min-watermark-is-not-being-met.patch
-Patch276: mm-vmscan-separate-sc-swap_cluster_max-and-sc-nr_max_reclaim.patch
-Patch277: mm-vmscan-kill-hibernation-specific-reclaim-logic-and-unify-it.patch
-Patch278: mm-vmscan-zone_reclaim-dont-use-insane-swap_cluster_max.patch
-Patch279: mm-vmscan-kill-sc-swap_cluster_max.patch
-Patch280: mm-vmscan-make-consistent-of-reclaim-bale-out-between-do_try_to_free_page-and-shrink_zone.patch
-Patch281: mm-vmscan-do-not-evict-inactive-pages-when-skipping-an-active-list-scan.patch
-Patch282: mm-stop-ptlock-enlarging-struct-page.patch
-Patch283: ksm-three-remove_rmap_item_from_tree-cleanups.patch
-Patch284: ksm-remove-redundancies-when-merging-page.patch
-Patch285: ksm-cleanup-some-function-arguments.patch
-Patch286: ksm-singly-linked-rmap_list.patch
-Patch287: ksm-separate-stable_node.patch
-Patch288: ksm-stable_node-point-to-page-and-back.patch
-Patch289: ksm-fix-mlockfreed-to-munlocked.patch
-Patch290: ksm-let-shared-pages-be-swappable.patch
-Patch291: ksm-hold-anon_vma-in-rmap_item.patch
-Patch292: ksm-take-keyhole-reference-to-page.patch
-Patch293: ksm-share-anon-page-without-allocating.patch
-Patch294: ksm-mem-cgroup-charge-swapin-copy.patch
-Patch295: ksm-rmap_walk-to-remove_migation_ptes.patch
-Patch296: ksm-memory-hotremove-migration-only.patch
-Patch297: ksm-remove-unswappable-max_kernel_pages.patch
-Patch298: ksm-fix-ksm-h-breakage-of-nommu-build.patch
-Patch299: mm-Add-mm-tracepoint-definitions-to-kmem-h.patch
-Patch300: mm-Add-anonynmous-page-mm-tracepoints.patch
-Patch301: mm-Add-file-page-mm-tracepoints.patch
-Patch302: mm-Add-page-reclaim-mm-tracepoints.patch
-Patch303: mm-Add-file-page-writeback-mm-tracepoints.patch
-Patch304: scsi-hpsa-new-driver.patch
-Patch305: scsi-cciss-remove-pci-ids.patch
-Patch306: quota-Move-definition-of-QFMT_OCFS2-to-linux-quota-h.patch
-Patch307: quota-Implement-quota-format-with-64-bit-space-and-inode-limits.patch
-Patch308: quota-ext3-Support-for-vfsv1-quota-format.patch
-Patch309: quota-ext4-Support-for-64-bit-quota-format.patch
-Patch310: kvm-core-x86-Add-user-return-notifiers.patch
-Patch311: kvm-VMX-Move-MSR_KERNEL_GS_BASE-out-of-the-vmx-autoload-msr-area.patch
-Patch312: kvm-x86-shared-msr-infrastructure.patch
-Patch313: kvm-VMX-Use-shared-msr-infrastructure.patch
-Patch314: redhat-excluding-Reverts-from-changelog-too.patch
-Patch315: redhat-tagging-2-6-32-4-el6.patch
-Patch316: redhat-updating-lastcommit-for-2-6-32-4.patch
-Patch317: redhat-do-not-export-redhat-directory-contents.patch
-Patch318: x86-Remove-the-CPU-cache-size-printk-s.patch
-Patch319: x86-Remove-CPU-cache-size-output-for-non-Intel-too.patch
-Patch320: x86-cpu-mv-display_cacheinfo-cpu_detect_cache_sizes.patch
-Patch321: x86-Limit-the-number-of-processor-bootup-messages.patch
-Patch322: init-Limit-the-number-of-per-cpu-calibration-bootup-messages.patch
-Patch323: sched-Limit-the-number-of-scheduler-debug-messages.patch
-Patch324: x86-Limit-number-of-per-cpu-TSC-sync-messages.patch
-Patch325: x86-Remove-enabling-x2apic-message-for-every-CPU.patch
-Patch326: x86-ucode-amd-Load-ucode-patches-once-and-not-separately-of-each-CPU.patch
-Patch327: block-cfq-iosched-reduce-write-depth-only-if-sync-was-delayed.patch
-Patch328: block-cfq-Optimization-for-close-cooperating-queue-searching.patch
-Patch329: block-cfq-iosched-Get-rid-of-cfqq-wait_busy_done-flag.patch
-Patch330: block-cfq-iosched-Take-care-of-corner-cases-of-group-losing-share-due-to-deletion.patch
-Patch331: block-cfq-iosched-commenting-non-obvious-initialization.patch
-Patch332: block-cfq-Remove-wait_request-flag-when-idle-time-is-being-deleted.patch
-Patch333: block-Fix-a-CFQ-crash-in-for-2-6-33-branch-of-block-tree.patch
-Patch334: block-cfq-set-workload-as-expired-if-it-doesn-t-have-any-slice-left.patch
-Patch335: block-cfq-iosched-Remove-the-check-for-same-cfq-group-from-allow_merge.patch
-Patch336: block-cfq-iosched-Get-rid-of-nr_groups.patch
-Patch337: block-cfq-iosched-Remove-prio_change-logic-for-workload-selection.patch
-Patch338: netdrv-ixgbe-add-support-for-82599-KR-and-update-to-latest-upstream.patch
-Patch339: netdrv-bnx2x-update-to-1-52-1-5.patch
-Patch340: netdrv-update-tg3-to-version-3-105.patch
-Patch341: scsi-scsi_dh-Change-the-scsidh_activate-interface-to-be-asynchronous.patch
-Patch342: scsi-scsi_dh-Make-rdac-hardware-handler-s-activate-async.patch
-Patch343: scsi-scsi_dh-Make-hp-hardware-handler-s-activate-async.patch
-Patch344: scsi-scsi_dh-Make-alua-hardware-handler-s-activate-async.patch
-Patch345: block-Fix-topology-stacking-for-data-and-discard-alignment.patch
-Patch346: dlm-always-use-GFP_NOFS.patch
-Patch347: redhat-Some-storage-related-kernel-config-parameter-changes.patch
-Patch348: scsi-eliminate-double-free.patch
-Patch349: scsi-make-driver-PCI-legacy-I-O-port-free.patch
-Patch350: gfs2-Fix-potential-race-in-glock-code.patch
-Patch351: netdrv-cnic-fixes-for-RHEL6.patch
-Patch352: netdrv-bnx2i-update-to-2-1-0.patch
-Patch353: mm-hwpoison-backport-the-latest-patches-from-linux-2-6-33.patch
-Patch354: fs-ext4-wait-for-log-to-commit-when-unmounting.patch
-Patch355: cifs-NULL-out-tcon-pSesInfo-and-srvTcp-pointers-when-chasing-DFS-referrals.patch
-Patch356: fusion-remove-unnecessary-printk.patch
-Patch357: fusion-fix-for-incorrect-data-underrun.patch
-Patch358: fusion-bump-version-to-3-04-13.patch
-Patch359: ext4-make-trim-discard-optional-and-off-by-default.patch
-Patch360: fat-make-discard-a-mount-option.patch
-Patch361: fs-fs-writeback-Add-helper-function-to-start-writeback-if-idle.patch
-Patch362: fs-ext4-flush-delalloc-blocks-when-space-is-low.patch
-Patch363: scsi-scsi_dh_rdac-add-two-IBM-devices-to-rdac_dev_list.patch
-Patch364: vfs-force-reval-of-target-when-following-LAST_BIND-symlinks.patch
-Patch365: input-Add-support-for-adding-i8042-filters.patch
-Patch366: input-dell-laptop-Update-rfkill-state-on-switch-change.patch
-Patch367: sunrpc-Deprecate-support-for-site-local-addresses.patch
-Patch368: sunrpc-Don-t-display-zero-scope-IDs.patch
-Patch369: s390-cio-double-free-under-memory-pressure.patch
-Patch370: s390-cio-device-recovery-stalls-after-multiple-hardware-events.patch
-Patch371: s390-cio-device-recovery-fails-after-concurrent-hardware-changes.patch
-Patch372: s390-cio-setting-a-device-online-or-offline-fails-for-unknown-reasons.patch
-Patch373: s390-cio-incorrect-device-state-after-device-recognition-and-recovery.patch
-Patch374: s390-cio-kernel-panic-after-unexpected-interrupt.patch
-Patch375: s390-cio-initialization-of-I-O-devices-fails.patch
-Patch376: s390-cio-not-operational-devices-cannot-be-deactivated.patch
-Patch377: s390-cio-erratic-DASD-I-O-behavior.patch
-Patch378: s390-cio-DASD-cannot-be-set-online.patch
-Patch379: s390-cio-DASD-steal-lock-task-hangs.patch
-Patch380: s390-cio-memory-leaks-when-checking-unusable-devices.patch
-Patch381: s390-cio-deactivated-devices-can-cause-use-after-free-panic.patch
-Patch382: nfs-NFS-update-to-2-6-33-part-1.patch
-Patch383: nfs-NFS-update-to-2-6-33-part-2.patch
-Patch384: nfs-NFS-update-to-2-6-33-part-3.patch
-Patch385: nfs-fix-insecure-export-option.patch
-Patch386: redhat-enable-NFS_V4_1.patch
-Patch387: x86-Compile-mce-inject-module.patch
-Patch388: modsign-Don-t-attempt-to-sign-a-module-if-there-are-no-key-files.patch
-Patch389: scsi-cciss-hpsa-reassign-controllers.patch
-Patch390: scsi-cciss-fix-spinlock-use.patch
-Patch391: redhat-disabling-temporaly-DEVTMPFS.patch
-Patch392: redhat-don-t-use-PACKAGE_VERSION-and-PACKAGE_RELEASE.patch
-Patch393: redhat-tagging-2-6-32-5-el6.patch
-Patch394: redhat-updating-lastcommit-for-2-6-32-5.patch
-Patch395: redhat-add-symbol-to-look-on-while-building-modules-block.patch
-Patch396: stable-signal-Fix-alternate-signal-stack-check.patch
-Patch397: stable-SCSI-osd_protocol-h-Add-missing-include.patch
-Patch398: stable-SCSI-megaraid_sas-fix-64-bit-sense-pointer-truncation.patch
-Patch399: stable-ext4-fix-potential-buffer-head-leak-when-add_dirent_to_buf-returns-ENOSPC.patch
-Patch400: stable-ext4-avoid-divide-by-zero-when-trying-to-mount-a-corrupted-file-system.patch
-Patch401: stable-ext4-fix-the-returned-block-count-if-EXT4_IOC_MOVE_EXT-fails.patch
-Patch402: stable-ext4-fix-lock-order-problem-in-ext4_move_extents.patch
-Patch403: stable-ext4-fix-possible-recursive-locking-warning-in-EXT4_IOC_MOVE_EXT.patch
-Patch404: stable-ext4-plug-a-buffer_head-leak-in-an-error-path-of-ext4_iget.patch
-Patch405: stable-ext4-make-sure-directory-and-symlink-blocks-are-revoked.patch
-Patch406: stable-ext4-fix-i_flags-access-in-ext4_da_writepages_trans_blocks.patch
-Patch407: stable-ext4-journal-all-modifications-in-ext4_xattr_set_handle.patch
-Patch408: stable-ext4-don-t-update-the-superblock-in-ext4_statfs.patch
-Patch409: stable-ext4-fix-uninit-block-bitmap-initialization-when-s_meta_first_bg-is-non-zero.patch
-Patch410: stable-ext4-fix-block-validity-checks-so-they-work-correctly-with-meta_bg.patch
-Patch411: stable-ext4-avoid-issuing-unnecessary-barriers.patch
-Patch412: stable-ext4-fix-error-handling-in-ext4_ind_get_blocks.patch
-Patch413: stable-ext4-make-norecovery-an-alias-for-noload.patch
-Patch414: stable-ext4-Fix-double-free-of-blocks-with-EXT4_IOC_MOVE_EXT.patch
-Patch415: stable-ext4-initialize-moved_len-before-calling-ext4_move_extents.patch
-Patch416: stable-ext4-move_extent_per_page-cleanup.patch
-Patch417: stable-jbd2-Add-ENOMEM-checking-in-and-for-jbd2_journal_write_metadata_buffer.patch
-Patch418: stable-ext4-Return-the-PTR_ERR-of-the-correct-pointer-in-setup_new_group_blocks.patch
-Patch419: stable-ext4-Avoid-data-filesystem-corruption-when-write-fails-to-copy-data.patch
-Patch420: stable-ext4-remove-blocks-from-inode-prealloc-list-on-failure.patch
-Patch421: stable-ext4-ext4_get_reserved_space-must-return-bytes-instead-of-blocks.patch
-Patch422: stable-ext4-quota-macros-cleanup.patch
-Patch423: stable-ext4-fix-incorrect-block-reservation-on-quota-transfer.patch
-Patch424: stable-ext4-Wait-for-proper-transaction-commit-on-fsync.patch
-Patch425: stable-ext4-Fix-potential-fiemap-deadlock-mmap_sem-vs-i_data_sem.patch
-Patch426: stable-USB-usb-storage-fix-bug-in-fill_inquiry.patch
-Patch427: stable-USB-option-add-pid-for-ZTE.patch
-Patch428: stable-firewire-ohci-handle-receive-packets-with-a-data-length-of-zero.patch
-Patch429: stable-rcu-Prepare-for-synchronization-fixes-clean-up-for-non-NO_HZ-handling-of-completed-counter.patch
-Patch430: stable-rcu-Fix-synchronization-for-rcu_process_gp_end-uses-of-completed-counter.patch
-Patch431: stable-rcu-Fix-note_new_gpnum-uses-of-gpnum.patch
-Patch432: stable-rcu-Remove-inline-from-forward-referenced-functions.patch
-Patch433: stable-perf_event-Fix-invalid-type-in-ioctl-definition.patch
-Patch434: stable-perf_event-Initialize-data-period-in-perf_swevent_hrtimer.patch
-Patch435: stable-PM-Runtime-Fix-lockdep-warning-in-__pm_runtime_set_status.patch
-Patch436: stable-sched-Check-for-an-idle-shared-cache-in-select_task_rq_fair.patch
-Patch437: stable-sched-Fix-affinity-logic-in-select_task_rq_fair.patch
-Patch438: stable-sched-Rate-limit-newidle.patch
-Patch439: stable-sched-Fix-and-clean-up-rate-limit-newidle-code.patch
-Patch440: stable-x86-amd-iommu-attach-devices-to-pre-allocated-domains-early.patch
-Patch441: stable-x86-amd-iommu-un__init-iommu_setup_msi.patch
-Patch442: stable-x86-Calgary-IOMMU-quirk-Find-nearest-matching-Calgary-while-walking-up-the-PCI-tree.patch
-Patch443: stable-x86-Fix-iommu-nodac-parameter-handling.patch
-Patch444: stable-x86-GART-pci-gart_64-c-Use-correct-length-in-strncmp.patch
-Patch445: stable-x86-ASUS-P4S800-reboot-bios-quirk.patch
-Patch446: stable-x86-apic-Enable-lapic-nmi-watchdog-on-AMD-Family-11h.patch
-Patch447: stable-ssb-Fix-range-check-in-sprom-write.patch
-Patch448: stable-ath5k-allow-setting-txpower-to-0.patch
-Patch449: stable-ath5k-enable-EEPROM-checksum-check.patch
-Patch450: stable-hrtimer-Fix-proc-timer_list-regression.patch
-Patch451: stable-ALSA-hrtimer-Fix-lock-up.patch
-Patch452: stable-KVM-x86-emulator-limit-instructions-to-15-bytes.patch
-Patch453: stable-KVM-s390-Fix-prefix-register-checking-in-arch-s390-kvm-sigp-c.patch
-Patch454: stable-KVM-s390-Make-psw-available-on-all-exits-not-just-a-subset.patch
-Patch455: stable-KVM-fix-irq_source_id-size-verification.patch
-Patch456: stable-KVM-x86-include-pvclock-MSRs-in-msrs_to_save.patch
-Patch457: stable-x86-Prevent-GCC-4-4-x-pentium-mmx-et-al-function-prologue-wreckage.patch
-Patch458: stable-x86-Use-maccumulate-outgoing-args-for-sane-mcount-prologues.patch
-Patch459: stable-x86-mce-don-t-restart-timer-if-disabled.patch
-Patch460: stable-x86-mce-Set-up-timer-unconditionally.patch
-Patch461: stable-x86-Fix-duplicated-UV-BAU-interrupt-vector.patch
-Patch462: stable-x86-Add-new-Intel-CPU-cache-size-descriptors.patch
-Patch463: stable-x86-Fix-typo-in-Intel-CPU-cache-size-descriptor.patch
-Patch464: stable-pata_hpt-37x-3x2n-fix-timing-register-masks-take-2.patch
-Patch465: stable-V4L-DVB-Fix-test-in-copy_reg_bits.patch
-Patch466: stable-bsdacct-fix-uid-gid-misreporting.patch
-Patch467: stable-UBI-flush-wl-before-clearing-update-marker.patch
-Patch468: stable-jbd2-don-t-wipe-the-journal-on-a-failed-journal-checksum.patch
-Patch469: stable-USB-xhci-Add-correct-email-and-files-to-MAINTAINERS-entry.patch
-Patch470: stable-USB-musb_gadget_ep0-fix-unhandled-endpoint-0-IRQs-again.patch
-Patch471: stable-USB-option-c-add-support-for-D-Link-DWM-162-U5.patch
-Patch472: stable-USB-usbtmc-repeat-usb_bulk_msg-until-whole-message-is-transfered.patch
-Patch473: stable-USB-usb-storage-add-BAD_SENSE-flag.patch
-Patch474: stable-USB-Close-usb_find_interface-race-v3.patch
-Patch475: stable-pxa-em-x270-fix-usb-hub-power-up-reset-sequence.patch
-Patch476: stable-hfs-fix-a-potential-buffer-overflow.patch
-Patch477: stable-md-bitmap-protect-against-bitmap-removal-while-being-updated.patch
-Patch478: stable-futex-Take-mmap_sem-for-get_user_pages-in-fault_in_user_writeable.patch
-Patch479: stable-devpts_get_tty-should-validate-inode.patch
-Patch480: stable-debugfs-fix-create-mutex-racy-fops-and-private-data.patch
-Patch481: stable-Driver-core-fix-race-in-dev_driver_string.patch
-Patch482: stable-Serial-Do-not-read-IIR-in-serial8250_start_tx-when-UART_BUG_TXEN.patch
-Patch483: stable-mac80211-Fix-bug-in-computing-crc-over-dynamic-IEs-in-beacon.patch
-Patch484: stable-mac80211-Fixed-bug-in-mesh-portal-paths.patch
-Patch485: stable-mac80211-Revert-Use-correct-sign-for-mesh-active-path-refresh.patch
-Patch486: stable-mac80211-fix-scan-abort-sanity-checks.patch
-Patch487: stable-wireless-correctly-report-signal-value-for-IEEE80211_HW_SIGNAL_UNSPEC.patch
-Patch488: stable-rtl8187-Fix-wrong-rfkill-switch-mask-for-some-models.patch
-Patch489: stable-x86-Fix-bogus-warning-in-apic_noop-apic_write.patch
-Patch490: stable-mm-hugetlb-fix-hugepage-memory-leak-in-mincore.patch
-Patch491: stable-mm-hugetlb-fix-hugepage-memory-leak-in-walk_page_range.patch
-Patch492: stable-powerpc-windfarm-Add-detection-for-second-cpu-pump.patch
-Patch493: stable-powerpc-therm_adt746x-Record-pwm-invert-bit-at-module-load-time.patch
-Patch494: stable-powerpc-Fix-usage-of-64-bit-instruction-in-32-bit-altivec-code.patch
-Patch495: stable-drm-radeon-kms-Add-quirk-for-HIS-X1300-board.patch
-Patch496: stable-drm-radeon-kms-handle-vblanks-properly-with-dpms-on.patch
-Patch497: stable-drm-radeon-kms-fix-legacy-crtc2-dpms.patch
-Patch498: stable-drm-radeon-kms-fix-vram-setup-on-rs600.patch
-Patch499: stable-drm-radeon-kms-rs6xx-rs740-clamp-vram-to-aperture-size.patch
-Patch500: stable-drm-ttm-Fix-build-failure-due-to-missing-struct-page.patch
-Patch501: stable-drm-i915-Set-the-error-code-after-failing-to-insert-new-offset-into-mm-ht.patch
-Patch502: stable-drm-i915-Add-the-missing-clonemask-for-display-port-on-Ironlake.patch
-Patch503: stable-xen-xenbus-make-DEVICE_ATTR-s-static.patch
-Patch504: stable-xen-re-register-runstate-area-earlier-on-resume.patch
-Patch505: stable-xen-restore-runstate_info-even-if-have_vcpu_info_placement.patch
-Patch506: stable-xen-correctly-restore-pfn_to_mfn_list_list-after-resume.patch
-Patch507: stable-xen-register-timer-interrupt-with-IRQF_TIMER.patch
-Patch508: stable-xen-register-runstate-on-secondary-CPUs.patch
-Patch509: stable-xen-don-t-call-dpm_resume_noirq-with-interrupts-disabled.patch
-Patch510: stable-xen-register-runstate-info-for-boot-CPU-early.patch
-Patch511: stable-xen-call-clock-resume-notifier-on-all-CPUs.patch
-Patch512: stable-xen-improve-error-handling-in-do_suspend.patch
-Patch513: stable-xen-don-t-leak-IRQs-over-suspend-resume.patch
-Patch514: stable-xen-use-iret-for-return-from-64b-kernel-to-32b-usermode.patch
-Patch515: stable-xen-explicitly-create-destroy-stop_machine-workqueues-outside-suspend-resume-region.patch
-Patch516: stable-Xen-balloon-fix-totalram_pages-counting.patch
-Patch517: stable-xen-try-harder-to-balloon-up-under-memory-pressure.patch
-Patch518: stable-slc90e66-fix-UDMA-handling.patch
-Patch519: stable-tcp-Stalling-connections-Fix-timeout-calculation-routine.patch
-Patch520: stable-ip_fragment-also-adjust-skb-truesize-for-packets-not-owned-by-a-socket.patch
-Patch521: stable-b44-WOL-setup-one-bit-off-stack-corruption-kernel-panic-fix.patch
-Patch522: stable-sparc64-Don-t-specify-IRQF_SHARED-for-LDC-interrupts.patch
-Patch523: stable-sparc64-Fix-overly-strict-range-type-matching-for-PCI-devices.patch
-Patch524: stable-sparc64-Fix-stack-debugging-IRQ-stack-regression.patch
-Patch525: stable-sparc-Set-UTS_MACHINE-correctly.patch
-Patch526: stable-b43legacy-avoid-PPC-fault-during-resume.patch
-Patch527: stable-tracing-Fix-event-format-export.patch
-Patch528: stable-ath9k-fix-tx-status-reporting.patch
-Patch529: stable-mac80211-Fix-dynamic-power-save-for-scanning.patch
-Patch530: stable-memcg-fix-memory-memsw-usage_in_bytes-for-root-cgroup.patch
-Patch531: stable-thinkpad-acpi-fix-default-brightness_mode-for-R50e-R51.patch
-Patch532: stable-thinkpad-acpi-preserve-rfkill-state-across-suspend-resume.patch
-Patch533: stable-ipw2100-fix-rebooting-hang-with-driver-loaded.patch
-Patch534: stable-matroxfb-fix-problems-with-display-stability.patch
-Patch535: stable-acerhdf-add-new-BIOS-versions.patch
-Patch536: stable-asus-laptop-change-light-sens-default-values.patch
-Patch537: stable-vmalloc-conditionalize-build-of-pcpu_get_vm_areas.patch
-Patch538: stable-ACPI-Use-the-ARB_DISABLE-for-the-CPU-which-model-id-is-less-than-0x0f.patch
-Patch539: stable-net-Fix-userspace-RTM_NEWLINK-notifications.patch
-Patch540: stable-ext3-Fix-data-filesystem-corruption-when-write-fails-to-copy-data.patch
-Patch541: stable-V4L-DVB-13116-gspca-ov519-Webcam-041e-4067-added.patch
-Patch542: stable-bcm63xx_enet-fix-compilation-failure-after-get_stats_count-removal.patch
-Patch543: stable-x86-Under-BIOS-control-restore-AP-s-APIC_LVTTHMR-to-the-BSP-value.patch
-Patch544: stable-drm-i915-Avoid-NULL-dereference-with-component_only-tv_modes.patch
-Patch545: stable-drm-i915-PineView-only-has-LVDS-and-CRT-ports.patch
-Patch546: stable-drm-i915-Fix-LVDS-stability-issue-on-Ironlake.patch
-Patch547: stable-mm-sigbus-instead-of-abusing-oom.patch
-Patch548: stable-ipvs-zero-usvc-and-udest.patch
-Patch549: stable-jffs2-Fix-long-standing-bug-with-symlink-garbage-collection.patch
-Patch550: stable-intel-iommu-ignore-page-table-validation-in-pass-through-mode.patch
-Patch551: stable-netfilter-xtables-document-minimal-required-version.patch
-Patch552: stable-perf_event-Fix-incorrect-range-check-on-cpu-number.patch
-Patch553: stable-implement-early_io-re-un-map-for-ia64.patch
-Patch554: stable-SCSI-ipr-fix-EEH-recovery.patch
-Patch555: stable-SCSI-qla2xxx-dpc-thread-can-execute-before-scsi-host-has-been-added.patch
-Patch556: stable-SCSI-st-fix-mdata-page_order-handling.patch
-Patch557: stable-SCSI-fc-class-fix-fc_transport_init-error-handling.patch
-Patch558: stable-sched-Fix-task_hot-test-order.patch
-Patch559: stable-x86-cpuid-Add-volatile-to-asm-in-native_cpuid.patch
-Patch560: stable-sched-Select_task_rq_fair-must-honour-SD_LOAD_BALANCE.patch
-Patch561: stable-clockevents-Prevent-clockevent_devices-list-corruption-on-cpu-hotplug.patch
-Patch562: stable-pata_hpt3x2n-fix-clock-turnaround.patch
-Patch563: stable-pata_cmd64x-fix-overclocking-of-UDMA0-2-modes.patch
-Patch564: stable-ASoC-wm8974-fix-a-wrong-bit-definition.patch
-Patch565: stable-sound-sgio2audio-pdaudiocf-usb-audio-initialize-PCM-buffer.patch
-Patch566: stable-ALSA-hda-Fix-missing-capsrc_nids-for-ALC88x.patch
-Patch567: stable-acerhdf-limit-modalias-matching-to-supported.patch
-Patch568: stable-ACPI-EC-Fix-MSI-DMI-detection.patch
-Patch569: stable-ACPI-Use-the-return-result-of-ACPI-lid-notifier-chain-correctly.patch
-Patch570: stable-powerpc-Handle-VSX-alignment-faults-correctly-in-little-endian-mode.patch
-Patch571: stable-ASoC-Do-not-write-to-invalid-registers-on-the-wm9712.patch
-Patch572: stable-drm-radeon-fix-build-on-64-bit-with-some-compilers.patch
-Patch573: stable-USB-emi62-fix-crash-when-trying-to-load-EMI-6-2-firmware.patch
-Patch574: stable-USB-option-support-hi-speed-for-modem-Haier-CE100.patch
-Patch575: stable-USB-Fix-a-bug-on-appledisplay-c-regarding-signedness.patch
-Patch576: stable-USB-musb-gadget_ep0-avoid-SetupEnd-interrupt.patch
-Patch577: stable-Bluetooth-Prevent-ill-timed-autosuspend-in-USB-driver.patch
-Patch578: stable-USB-rename-usb_configure_device.patch
-Patch579: stable-USB-fix-bugs-in-usb_-de-authorize_device.patch
-Patch580: stable-drivers-net-usb-Correct-code-taking-the-size-of-a-pointer.patch
-Patch581: stable-x86-SGI-UV-Fix-writes-to-led-registers-on-remote-uv-hubs.patch
-Patch582: stable-md-Fix-unfortunate-interaction-with-evms.patch
-Patch583: stable-dma-at_hdmac-correct-incompatible-type-for-argument-1-of-spin_lock_bh.patch
-Patch584: stable-dma-debug-Do-not-add-notifier-when-dma-debugging-is-disabled.patch
-Patch585: stable-dma-debug-Fix-bug-causing-build-warning.patch
-Patch586: stable-x86-amd-iommu-Fix-initialization-failure-panic.patch
-Patch587: stable-ioat3-fix-p-disabled-q-continuation.patch
-Patch588: stable-ioat2-3-put-channel-hardware-in-known-state-at-init.patch
-Patch589: stable-KVM-MMU-remove-prefault-from-invlpg-handler.patch
-Patch590: stable-KVM-LAPIC-make-sure-IRR-bitmap-is-scanned-after-vm-load.patch
-Patch591: stable-Libertas-fix-buffer-overflow-in-lbs_get_essid.patch
-Patch592: stable-iwmc3200wifi-fix-array-out-of-boundary-access.patch
-Patch593: stable-mac80211-fix-propagation-of-failed-hardware-reconfigurations.patch
-Patch594: stable-mac80211-fix-WMM-AP-settings-application.patch
-Patch595: stable-mac80211-Fix-IBSS-merge.patch
-Patch596: stable-cfg80211-fix-race-between-deauth-and-assoc-response.patch
-Patch597: stable-ath5k-fix-SWI-calibration-interrupt-storm.patch
-Patch598: stable-ath9k-wake-hardware-for-interface-IBSS-AP-Mesh-removal.patch
-Patch599: stable-ath9k-Fix-TX-queue-draining.patch
-Patch600: stable-ath9k-fix-missed-error-codes-in-the-tx-status-check.patch
-Patch601: stable-ath9k-wake-hardware-during-AMPDU-TX-actions.patch
-Patch602: stable-ath9k-fix-suspend-by-waking-device-prior-to-stop.patch
-Patch603: stable-ath9k_hw-Fix-possible-OOB-array-indexing-in-gen_timer_index-on-64-bit.patch
-Patch604: stable-ath9k_hw-Fix-AR_GPIO_INPUT_EN_VAL_BT_PRIORITY_BB-and-its-shift-value-in-0x4054.patch
-Patch605: stable-iwl3945-disable-power-save.patch
-Patch606: stable-iwl3945-fix-panic-in-iwl3945-driver.patch
-Patch607: stable-iwlwifi-fix-EEPROM-OTP-reading-endian-annotations-and-a-bug.patch
-Patch608: stable-iwlwifi-fix-more-eeprom-endian-bugs.patch
-Patch609: stable-iwlwifi-fix-40MHz-operation-setting-on-cards-that-do-not-allow-it.patch
-Patch610: stable-mac80211-fix-race-with-suspend-and-dynamic_ps_disable_work.patch
-Patch611: stable-NOMMU-Optimise-away-the-dac_-mmap_min_addr-tests.patch
-Patch612: stable-sysctl_max_map_count-should-be-non-negative.patch
-Patch613: stable-kernel-sysctl-c-fix-the-incomplete-part-of-sysctl_max_map_count-should-be-non-negative-patch.patch
-Patch614: stable-V4L-DVB-13596-ov511-c-typo-lock-unlock.patch
-Patch615: stable-x86-ptrace-make-genregs-32-_get-set-more-robust.patch
-Patch616: stable-memcg-avoid-oom-killing-innocent-task-in-case-of-use_hierarchy.patch
-Patch617: stable-e100-Fix-broken-cbs-accounting-due-to-missing-memset.patch
-Patch618: stable-ipv6-reassembly-use-seperate-reassembly-queues-for-conntrack-and-local-delivery.patch
-Patch619: stable-netfilter-fix-crashes-in-bridge-netfilter-caused-by-fragment-jumps.patch
-Patch620: stable-hwmon-sht15-Off-by-one-error-in-array-index-incorrect-constants.patch
-Patch621: stable-b43-avoid-PPC-fault-during-resume.patch
-Patch622: stable-Keys-KEYCTL_SESSION_TO_PARENT-needs-TIF_NOTIFY_RESUME-architecture-support.patch
-Patch623: stable-sched-Fix-balance-vs-hotplug-race.patch
-Patch624: stable-drm-radeon-kms-fix-crtc-vblank-update-for-r600.patch
-Patch625: stable-drm-disable-all-the-possible-outputs-crtcs-before-entering-KMS-mode.patch
-Patch626: stable-orinoco-fix-GFP_KERNEL-in-orinoco_set_key-with-interrupts-disabled.patch
-Patch627: stable-udf-Try-harder-when-looking-for-VAT-inode.patch
-Patch628: stable-Add-unlocked-version-of-inode_add_bytes-function.patch
-Patch629: stable-quota-decouple-fs-reserved-space-from-quota-reservation.patch
-Patch630: stable-ext4-Convert-to-generic-reserved-quota-s-space-management.patch
-Patch631: stable-ext4-fix-sleep-inside-spinlock-issue-with-quota-and-dealloc-14739.patch
-Patch632: stable-x86-msr-Unify-rdmsr_on_cpus-wrmsr_on_cpus.patch
-Patch633: stable-cpumask-use-modern-cpumask-style-in-drivers-edac-amd64_edac-c.patch
-Patch634: stable-amd64_edac-unify-MCGCTL-ECC-switching.patch
-Patch635: stable-x86-msr-Add-support-for-non-contiguous-cpumasks.patch
-Patch636: stable-x86-msr-msrs_alloc-free-for-CONFIG_SMP-n.patch
-Patch637: stable-amd64_edac-fix-driver-instance-freeing.patch
-Patch638: stable-amd64_edac-make-driver-loading-more-robust.patch
-Patch639: stable-amd64_edac-fix-forcing-module-load-unload.patch
-Patch640: stable-sched-Sched_rt_periodic_timer-vs-cpu-hotplug.patch
-Patch641: stable-ext4-Update-documentation-to-correct-the-inode_readahead_blks-option-name.patch
-Patch642: stable-lguest-fix-bug-in-setting-guest-GDT-entry.patch
-Patch643: stable-rt2x00-Disable-powersaving-for-rt61pci-and-rt2800pci.patch
-Patch644: stable-generic_permission-MAY_OPEN-is-not-write-access.patch
-Patch645: redhat-fix-typo-while-disabling-CONFIG_CPU_SUP_CENTAUR.patch
-Patch646: redhat-check-if-patchutils-is-installed-before-creating-patches.patch
-Patch647: redhat-do-a-basic-sanity-check-to-verify-the-modules-are-being-signed.patch
-Patch648: redhat-Fix-kABI-dependency-generation.patch
-Patch649: tpm-autoload-tpm_tis-driver.patch
-Patch650: x86-mce-fix-confusion-between-bank-attributes-and-mce-attributes.patch
-Patch651: netdrv-be2net-update-be2net-driver-to-latest-upstream.patch
-Patch652: s390x-tape-incomplete-device-removal.patch
-Patch653: s390-kernel-improve-code-generated-by-atomic-operations.patch
-Patch654: x86-AMD-Fix-stale-cpuid4_info-shared_map-data-in-shared_cpu_map-cpumasks.patch
-Patch655: nfs-fix-oops-in-nfs_rename.patch
-Patch656: modsign-Remove-Makefile-modpost-qualifying-message-for-module-sign-failure.patch
-Patch657: redhat-disable-framepointer-build-by-default.patch
-Patch658: redhat-use-sysconf-_SC_PAGESIZE-instead-of-getpagesize.patch
-Patch659: redhat-tagging-2-6-32-6-el6.patch
-Patch660: redhat-updating-lastcommit-for-2-6-32-6.patch
-Patch661: kvm-Dont-pass-kvm_run-arguments.patch
-Patch662: kvm-Call-pic_clear_isr-on-pic-reset-to-reuse-logic-there.patch
-Patch663: kvm-Move-irq-sharing-information-to-irqchip-level.patch
-Patch664: kvm-Change-irq-routing-table-to-use-gsi-indexed-array.patch
-Patch665: kvm-Maintain-back-mapping-from-irqchip-pin-to-gsi.patch
-Patch666: kvm-Move-irq-routing-data-structure-to-rcu-locking.patch
-Patch667: kvm-Move-irq-ack-notifier-list-to-arch-independent-code.patch
-Patch668: kvm-Convert-irq-notifiers-lists-to-RCU-locking.patch
-Patch669: kvm-Move-IO-APIC-to-its-own-lock.patch
-Patch670: kvm-Drop-kvm-irq_lock-lock-from-irq-injection-path.patch
-Patch671: kvm-Add-synchronize_srcu_expedited.patch
-Patch672: kvm-rcu-Add-synchronize_srcu_expedited-to-the-rcutorture-test-suite.patch
-Patch673: kvm-rcu-Add-synchronize_srcu_expedited-to-the-documentation.patch
-Patch674: kvm-rcu-Enable-synchronize_sched_expedited-fastpath.patch
-Patch675: kvm-modify-memslots-layout-in-struct-kvm.patch
-Patch676: kvm-modify-alias-layout-in-x86s-struct-kvm_arch.patch
-Patch677: kvm-split-kvm_arch_set_memory_region-into-prepare-and-commit.patch
-Patch678: kvm-introduce-gfn_to_pfn_memslot.patch
-Patch679: kvm-use-gfn_to_pfn_memslot-in-kvm_iommu_map_pages.patch
-Patch680: kvm-introduce-kvm-srcu-and-convert-kvm_set_memory_region-to-SRCU-update.patch
-Patch681: kvm-use-SRCU-for-dirty-log.patch
-Patch682: kvm-x86-switch-kvm_set_memory_alias-to-SRCU-update.patch
-Patch683: kvm-convert-io_bus-to-SRCU.patch
-Patch684: kvm-switch-vcpu-context-to-use-SRCU.patch
-Patch685: kvm-convert-slots_lock-to-a-mutex.patch
-Patch686: kvm-Bump-maximum-vcpu-count-to-64.patch
-Patch687: kvm-avoid-taking-ioapic-mutex-for-non-ioapic-EOIs.patch
-Patch688: kvm-VMX-Use-macros-instead-of-hex-value-on-cr0-initialization.patch
-Patch689: kvm-SVM-Reset-cr0-properly-on-vcpu-reset.patch
-Patch690: kvm-SVM-init_vmcb-remove-redundant-save-cr0-initialization.patch
-Patch691: kvm-fix-kvmclock-adjust-offset-ioctl-to-match-upstream.patch
-Patch692: kvm-x86-Add-KVM_GET-SET_VCPU_EVENTS.patch
-Patch693: kvm-x86-Extend-KVM_SET_VCPU_EVENTS-with-selective-updates.patch
-Patch694: kvm-remove-pre_task_link-setting-in-save_state_to_tss16.patch
-Patch695: kvm-SVM-Move-INTR-vmexit-out-of-atomic-code.patch
-Patch696: kvm-SVM-Notify-nested-hypervisor-of-lost-event-injections.patch
-Patch697: kvm-SVM-remove-needless-mmap_sem-acquision-from-nested_svm_map.patch
-Patch698: kvm-VMX-Disable-unrestricted-guest-when-EPT-disabled.patch
-Patch699: kvm-x86-disallow-multiple-KVM_CREATE_IRQCHIP.patch
-Patch700: kvm-x86-disallow-KVM_-SET-GET-_LAPIC-without-allocated-in-kernel-lapic.patch
-Patch701: kvm-x86-disable-paravirt-mmu-reporting.patch
-Patch702: kvm-Allow-internal-errors-reported-to-userspace-to-carry-extra-data.patch
-Patch703: kvm-VMX-Report-unexpected-simultaneous-exceptions-as-internal-errors.patch
-Patch704: kvm-fix-lock-imbalance-in-kvm_-_irq_source_id.patch
-Patch705: kvm-only-clear-irq_source_id-if-irqchip-is-present.patch
-Patch706: kvm-Fix-possible-circular-locking-in-kvm_vm_ioctl_assign_device.patch
-Patch707: block-Fix-incorrect-alignment-offset-reporting-and-update-documentation.patch
-Patch708: block-Correct-handling-of-bottom-device-misaligment.patch
-Patch709: block-Fix-discard-alignment-calculation-and-printing.patch
-Patch710: block-bdev_stack_limits-wrapper.patch
-Patch711: dm-Fix-device-mapper-topology-stacking.patch
-Patch712: block-Stop-using-byte-offsets.patch
-Patch713: dm-add-feature-flags-to-reduce-future-kABI-impact.patch
-Patch714: netdrv-igb-Update-igb-driver-to-support-Barton-Hills.patch
-Patch715: redhat-Don-t-compile-DECNET.patch
-Patch716: redhat-fs-don-t-build-freevxfs.patch
-Patch717: redhat-disable-KVM-on-non-x86_64-arches.patch
-Patch718: gfs-GFS2-Fix-up-system-xattrs.patch
-Patch719: gfs-VFS-Add-forget_all_cached_acls.patch
-Patch720: gfs-GFS2-Use-forget_all_cached_acls.patch
-Patch721: gfs-GFS2-Use-gfs2_set_mode-instead-of-munge_mode.patch
-Patch722: gfs-GFS2-Clean-up-ACLs.patch
-Patch723: gfs-GFS2-Add-cached-ACLs-support.patch
-Patch724: gfs-VFS-Use-GFP_NOFS-in-posix_acl_from_xattr.patch
-Patch725: gfs-GFS2-Fix-gfs2_xattr_acl_chmod.patch
-Patch726: gfs2-Fix-o-meta-mounts-for-subsequent-mounts.patch
-Patch727: gfs2-Alter-arguments-of-gfs2_quota-statfs_sync.patch
-Patch728: gfs2-Hook-gfs2_quota_sync-into-VFS-via-gfs2_quotactl_ops.patch
-Patch729: gfs2-Remove-obsolete-code-in-quota-c.patch
-Patch730: gfs2-Add-get_xstate-quota-function.patch
-Patch731: gfs2-Add-proper-error-reporting-to-quota-sync-via-sysfs.patch
-Patch732: gfs2-Remove-constant-argument-from-qdsb_get.patch
-Patch733: gfs2-Remove-constant-argument-from-qd_get.patch
-Patch734: gfs2-Clean-up-gfs2_adjust_quota-and-do_glock.patch
-Patch735: gfs2-Add-get_xquota-support.patch
-Patch736: gfs2-Add-set_xquota-support.patch
-Patch737: gfs2-Improve-statfs-and-quota-usability.patch
-Patch738: gfs2-remove-division-from-new-statfs-code.patch
-Patch739: gfs2-add-barrier-nobarrier-mount-options.patch
-Patch740: gfs2-only-show-nobarrier-option-on-proc-mounts-when-the-option-is-active.patch
-Patch741: gfs-GFS2-Fix-lock-ordering-in-gfs2_check_blk_state.patch
-Patch742: gfs-GFS2-Fix-locking-bug-in-rename.patch
-Patch743: gfs-GFS2-Ensure-uptodate-inode-size-when-using-O_APPEND.patch
-Patch744: gfs-GFS2-Fix-glock-refcount-issues.patch
-Patch745: powerpc-pseries-Add-extended_cede_processor-helper-function.patch
-Patch746: powerpc-pseries-Add-hooks-to-put-the-CPU-into-an-appropriate-offline-state.patch
-Patch747: powerpc-Kernel-handling-of-Dynamic-Logical-Partitioning.patch
-Patch748: powerpc-sysfs-cpu-probe-release-files.patch
-Patch749: powerpc-CPU-DLPAR-handling.patch
-Patch750: powerpc-Add-code-to-online-offline-CPUs-of-a-DLPAR-node.patch
-Patch751: powerpc-cpu-allocation-deallocation-process.patch
-Patch752: powerpc-pseries-Correct-pseries-dlpar-c-build-break-without-CONFIG_SMP.patch
-Patch753: net-dccp-fix-module-load-dependency-btw-dccp_probe-and-dccp.patch
-Patch754: drm-drm-edid-update-to-2-6-33-EDID-parser-code.patch
-Patch755: drm-mm-patch-drm-core-memory-range-manager-up-to-2-6-33.patch
-Patch756: drm-ttm-rollup-upstream-TTM-fixes.patch
-Patch757: drm-unlocked-ioctl-support-for-core-macro-fixes.patch
-Patch758: drm-add-new-userspace-core-drm-interfaces-from-2-6-33.patch
-Patch759: drm-remove-address-mask-param-for-drm_pci_alloc.patch
-Patch760: drm-kms-rollup-KMS-core-and-helper-changes-to-2-6-33.patch
-Patch761: drm-radeon-intel-realign-displayport-helper-code-with-upstream.patch
-Patch762: drm-i915-bring-Intel-DRM-KMS-driver-up-to-2-6-33.patch
-Patch763: drm-radeon-kms-update-to-2-6-33-without-TTM-API-changes.patch
-Patch764: drm-ttm-validation-API-changes-ERESTART-fixes.patch
-Patch765: drm-nouveau-update-to-2-6-33-level.patch
-Patch766: x86-allow-fbdev-primary-video-code-on-64-bit.patch
-Patch767: offb-add-support-for-framebuffer-handoff-to-offb.patch
-Patch768: drm-minor-printk-fixes-from-upstream.patch
-Patch769: redhat-tagging-2-6-32-7-el6.patch
-Patch770: redhat-updating-lastcommit-for-2-6-32-7.patch
-Patch771: build-Revert-redhat-disabling-temporaly-DEVTMPFS.patch
-Patch772: redhat-tagging-2-6-32-8-el6.patch
-Patch773: redhat-updating-lastcommit-for-2-6-32-8.patch
-Patch774: serial-8250-add-support-for-DTR-DSR-hardware-flow-control.patch
-Patch775: s390x-qeth-Support-for-HiperSockets-Network-Traffic-Analyzer.patch
-Patch776: s390-qeth-fix-packet-loss-if-TSO-is-switched-on.patch
-Patch777: s390x-tape-Add-pr_fmt-macro-to-all-tape-source-files.patch
-Patch778: net-dccp-modify-how-dccp-creates-slab-caches-to-prevent-bug-halt-in-SLUB.patch
-Patch779: scsi-sync-fcoe-with-upstream.patch
-Patch780: block-Honor-the-gfp_mask-for-alloc_page-in-blkdev_issue_discard.patch
-Patch781: sound-ALSA-HDA-driver-update-2009-12-15-2.patch
-Patch782: scsi-mpt2sas-use-sas-address-instead-of-handle-as-a-lookup.patch
-Patch783: scsi-mpt2sas-fix-expander-remove-fail.patch
-Patch784: scsi-mpt2sas-check-for-valid-response-info.patch
-Patch785: scsi-mpt2sas-new-device-SAS2208-support.patch
-Patch786: scsi-mpt2sas-adding-MPI-Headers-revision-L.patch
-Patch787: scsi-mpt2sas-stop-driver-when-firmware-encounters-faults.patch
-Patch788: scsi-mpt2sas-fix-some-comments.patch
-Patch789: scsi-mpt2sas-add-command-line-option-diag_buffer_enable.patch
-Patch790: scsi-mpt2sas-add-extended-type-for-diagnostic-buffer-support.patch
-Patch791: scsi-mpt2sas-add-TimeStamp-support-when-sending-ioc_init.patch
-Patch792: scsi-mpt2sas-limit-the-max_depth-to-32-for-SATA-devices.patch
-Patch793: scsi-mpt2sas-add-new-info-messages-for-IR-and-Expander-events.patch
-Patch794: scsi-mpt2sas-retrieve-the-ioc-facts-prior-to-putting-the-controller-into-READY-state.patch
-Patch795: scsi-mpt2sas-return-DID_TRANSPORT_DISRUPTED-in-nexus-loss-and-SCSI_MLQUEUE_DEVICE_BUSY-if-device-is-busy.patch
-Patch796: scsi-mpt2sas-mpt2sas_base_get_sense_buffer_dma-returns-little-endian.patch
-Patch797: scsi-mpt2sas-fix-PPC-endian-bug.patch
-Patch798: scsi-mpt2sas-freeze-the-sdev-IO-queue-when-firmware-sends-internal-device-reset.patch
-Patch799: scsi-mpt2sas-add-support-for-RAID-Action-System-Shutdown-Initiated-at-OS-Shutdown.patch
-Patch800: scsi-mpt2sas-don-t-update-links-nor-unblock-device-at-no-link-rate-change.patch
-Patch801: scsi-mpt2sas-Bump-version-03-100-03-00.patch
-Patch802: scsi-megaraid-upgrade-to-4-17.patch
-Patch803: uv-x86-SGI-Dont-track-GRU-space-in-PAT.patch
-Patch804: uv-x86-mm-Call-is_untracked_pat_range-rather-than-is_ISA_range.patch
-Patch805: uv-x86-mm-is_untracked_pat_range-takes-a-normal-semiclosed-range.patch
-Patch806: uv-x86-platform-Change-is_untracked_pat_range-to-bool.patch
-Patch807: uv-x86-Change-is_ISA_range-into-an-inline-function.patch
-Patch808: uv-x86-mm-Correct-the-implementation-of-is_untracked_pat_range.patch
-Patch809: uv-x86-RTC-Rename-generic_interrupt-to-x86_platform_ipi.patch
-Patch810: uv-x86-RTC-Always-enable-RTC-clocksource.patch
-Patch811: uv-x86-SGI-Fix-irq-affinity-for-hub-based-interrupts.patch
-Patch812: uv-x86-apic-Move-SGI-UV-functionality-out-of-generic-IO-APIC-code.patch
-Patch813: uv-x86-irq-Allow-0xff-for-proc-irq-n-smp_affinity-on-an-8-cpu-system.patch
-Patch814: uv-x86-Remove-move_cleanup_count-from-irq_cfg.patch
-Patch815: uv-x86-irq-Check-move_in_progress-before-freeing-the-vector-mapping.patch
-Patch816: uv-xpc-needs-to-provide-an-abstraction-for-uv_gpa.patch
-Patch817: uv-x86-update-XPC-to-handle-updated-BIOS-interface.patch
-Patch818: uv-x86-xpc-NULL-deref-when-mesq-becomes-empty.patch
-Patch819: uv-x86-xpc_make_first_contact-hang-due-to-not-accepting-ACTIVE-state.patch
-Patch820: uv-x86-XPC-receive-message-reuse-triggers-invalid-BUG_ON.patch
-Patch821: uv-XPC-pass-nasid-instead-of-nid-to-gru_create_message_queue.patch
-Patch822: gru-GRU-Rollup-patch.patch
-Patch823: uv-React-2-6-32-y-isolcpus-broken-in-2-6-32-y-kernel.patch
-Patch824: nfs-nfsd-make-sure-data-is-on-disk-before-calling-fsync.patch
-Patch825: nfs-sunrpc-fix-peername-failed-on-closed-listener.patch
-Patch826: nfs-SUNRPC-Fix-up-an-error-return-value-in-gss_import_sec_context_kerberos.patch
-Patch827: nfs-SUNRPC-Fix-the-return-value-in-gss_import_sec_context.patch
-Patch828: nfs-sunrpc-on-successful-gss-error-pipe-write-don-t-return-error.patch
-Patch829: nfs-sunrpc-fix-build-time-warning.patch
-Patch830: scsi-bfa-update-from-2-1-2-0-to-2-1-2-1.patch
-Patch831: scsi-qla2xxx-Update-support-for-FC-FCoE-HBA-CNA.patch
-Patch832: irq-Expose-the-irq_desc-node-as-proc-irq-node.patch
-Patch833: cgroups-fix-for-kernel-BUG-at-kernel-cgroup-c-790.patch
-Patch834: tracing-tracepoint-Add-signal-tracepoints.patch
-Patch835: block-direct-io-cleanup-blockdev_direct_IO-locking.patch
-Patch836: pci-PCIe-AER-honor-ACPI-HEST-FIRMWARE-FIRST-mode.patch
-Patch837: x86-Add-kernel-pagefault-tracepoint-for-x86-x86_64.patch
-Patch838: fs-xfs-2-6-33-updates.patch
-Patch839: x86-dell-wmi-Add-support-for-new-Dell-systems.patch
-Patch840: x86-core-make-LIST_POISON-less-deadly.patch
-Patch841: kvm-fix-cleanup_srcu_struct-on-vm-destruction.patch
-Patch842: redhat-tagging-2-6-32-9-el6.patch
-Patch843: redhat-updating-lastcommit-for-2-6-32-9.patch
-Patch844: scsi-scsi_transport_fc-Allow-LLD-to-reset-FC-BSG-timeout.patch
-Patch845: s390x-zfcp-introduce-BSG-timeout-callback.patch
-Patch846: s390x-zfcp-set-HW-timeout-requested-by-BSG-request.patch
-Patch847: redhat-config-increase-printk-buffer.patch
-Patch848: netdrv-qlge-update-to-upstream-version-v1-00-00-23-00-00-01.patch
-Patch849: gfs-Add-quota-netlink-support.patch
-Patch850: gfs-Use-dquot_send_warning.patch
-Patch851: netdrv-e1000e-update-to-the-latest-upstream.patch
-Patch852: x86-Disable-Memory-hot-add-on-x86-32-bit.patch
-Patch853: utrace-fix-utrace_maybe_reap-vs-find_matching_engine-race.patch
-Patch854: perf-add-kernel-internal-interface.patch
-Patch855: perf-improve-error-reporting.patch
-Patch856: perf-Add-a-callback-to-perf-events.patch
-Patch857: perf-Allow-for-custom-overflow-handlers.patch
-Patch858: perf-Fix-PERF_FORMAT_GROUP-scale-info.patch
-Patch859: perf-Fix-event-scaling-for-inherited-counters.patch
-Patch860: perf-Fix-locking-for-PERF_FORMAT_GROUP.patch
-Patch861: perf-Use-overflow-handler-instead-of-the-event-callback.patch
-Patch862: perf-Remove-the-event-callback-from-perf-events.patch
-Patch863: s390x-ptrace-dont-abuse-PT_PTRACED.patch
-Patch864: s390x-fix-loading-of-PER-control-registers-for-utrace.patch
-Patch865: scsi-aic79xx-check-for-non-NULL-scb-in-ahd_handle_nonpkt_busfree.patch
-Patch866: sound-Fix-SPDIF-In-for-AD1988-codecs-add-Intel-Cougar-IDs.patch
-Patch867: x86-Force-irq-complete-move-during-cpu-offline.patch
-Patch868: netdrv-vxge-fix-issues-found-in-Neterion-testing.patch
-Patch869: mm-mmap-don-t-return-ENOMEM-when-mapcount-is-temporarily-exceeded-in-munmap.patch
-Patch870: redhat-tagging-2-6-32-10-el6.patch
-Patch871: redhat-updating-lastcommit-for-2-6-32-10.patch
-Patch872: stable-untangle-the-do_mremap-mess.patch
-Patch873: stable-fasync-split-fasync_helper-into-separate-add-remove-functions.patch
-Patch874: stable-ASoC-fix-params_rate-macro-use-in-several-codecs.patch
-Patch875: stable-modules-Skip-empty-sections-when-exporting-section-notes.patch
-Patch876: stable-exofs-simple_write_end-does-not-mark_inode_dirty.patch
-Patch877: stable-Revert-x86-Side-step-lguest-problem-by-only-building-cmpxchg8b_emu-for-pre-Pentium.patch
-Patch878: stable-rtc_cmos-convert-shutdown-to-new-pnp_driver-shutdown.patch
-Patch879: stable-drivers-cpuidle-governors-menu-c-fix-undefined-reference-to-__udivdi3.patch
-Patch880: stable-lib-rational-c-needs-module-h.patch
-Patch881: stable-dma-debug-allow-DMA_BIDIRECTIONAL-mappings-to-be-synced-with-DMA_FROM_DEVICE-and.patch
-Patch882: stable-kernel-signal-c-fix-kernel-information-leak-with-print-fatal-signals-1.patch
-Patch883: stable-mmc_block-add-dev_t-initialization-check.patch
-Patch884: stable-mmc_block-fix-probe-error-cleanup-bug.patch
-Patch885: stable-mmc_block-fix-queue-cleanup.patch
-Patch886: stable-ALSA-ac97-Add-Dell-Dimension-2400-to-Headphone-Line-Jack-Sense-blacklist.patch
-Patch887: stable-ALSA-atiixp-Specify-codec-for-Foxconn-RC4107MA-RS2.patch
-Patch888: stable-ASoC-Fix-WM8350-DSP-mode-B-configuration.patch
-Patch889: stable-netfilter-ebtables-enforce-CAP_NET_ADMIN.patch
-Patch890: stable-netfilter-nf_ct_ftp-fix-out-of-bounds-read-in-update_nl_seq.patch
-Patch891: stable-hwmon-coretemp-Fix-TjMax-for-Atom-N450-D410-D510-CPUs.patch
-Patch892: stable-hwmon-adt7462-Fix-pin-28-monitoring.patch
-Patch893: stable-quota-Fix-dquot_transfer-for-filesystems-different-from-ext4.patch
-Patch894: stable-xen-fix-hang-on-suspend.patch
-Patch895: stable-iwlwifi-fix-iwl_queue_used-bug-when-read_ptr-write_ptr.patch
-Patch896: stable-ath5k-Fix-eeprom-checksum-check-for-custom-sized-eeproms.patch
-Patch897: stable-cfg80211-fix-syntax-error-on-user-regulatory-hints.patch
-Patch898: stable-iwl-off-by-one-bug.patch
-Patch899: stable-mac80211-add-missing-sanity-checks-for-action-frames.patch
-Patch900: stable-libertas-Remove-carrier-signaling-from-the-scan-code.patch
-Patch901: stable-kernel-sysctl-c-fix-stable-merge-error-in-NOMMU-mmap_min_addr.patch
-Patch902: stable-mac80211-fix-skb-buffering-issue-and-fixes-to-that.patch
-Patch903: stable-fix-braindamage-in-audit_tree-c-untag_chunk.patch
-Patch904: stable-fix-more-leaks-in-audit_tree-c-tag_chunk.patch
-Patch905: stable-module-handle-ppc64-relocating-kcrctabs-when-CONFIG_RELOCATABLE-y.patch
-Patch906: stable-ipv6-skb_dst-can-be-NULL-in-ipv6_hop_jumbo.patch
-Patch907: misc-Revert-stable-module-handle-ppc64-relocating-kcrctabs-when-CONFIG_RELOCATABLE-y.patch
-Patch908: netdrv-e1000e-enhance-frame-fragment-detection.patch
-Patch909: redhat-kABI-internal-only-files.patch
-Patch910: drm-bring-RHEL6-radeon-drm-up-to-2-6-33-rc4-5-level.patch
-Patch911: s390x-qeth-set-default-BLKT-settings-dependend-on-OSA-hw-level.patch
-Patch912: block-dm-replicator-documentation-and-module-registry.patch
-Patch913: block-dm-replicator-replication-log-and-site-link-handler-interfaces-and-main-replicator-module.patch
-Patch914: block-dm-replicator-ringbuffer-replication-log-handler.patch
-Patch915: block-dm-replicator-blockdev-site-link-handler.patch
-Patch916: block-dm-raid45-add-raid45-target.patch
-Patch917: dm-dm-raid45-export-missing-dm_rh_inc.patch
-Patch918: kdump-Remove-the-32MB-limitation-for-crashkernel.patch
-Patch919: redhat-tagging-2-6-32-11-el6.patch
-Patch920: redhat-updating-lastcommit-for-2-6-32-11.patch
-Patch921: redhat-Revert-edac-amd64_edac-disabling-temporarily.patch
-Patch922: x86-Use-EOI-register-in-io-apic-on-intel-platforms.patch
-Patch923: x86-Remove-local_irq_enable-local_irq_disable-in-fixup_irqs.patch
-Patch924: x86-io-apic-Move-the-effort-of-clearing-remoteIRR-explicitly-before-migrating-the-irq.patch
-Patch925: x86-ioapic-Fix-the-EOI-register-detection-mechanism.patch
-Patch926: x86-ioapic-Document-another-case-when-level-irq-is-seen-as-an-edge.patch
-Patch927: x86-Remove-unnecessary-mdelay-from-cpu_disable_common.patch
-Patch928: redhat-rpadlpar_io-should-be-built-in-kernel.patch
-Patch929: x86-msr-cpuid-Register-enough-minors-for-the-MSR-and-CPUID-drivers.patch
-Patch930: scsi-Sync-be2iscsi-with-upstream.patch
-Patch931: redhat-config-disable-CONFIG_X86_CPU_DEBUG.patch
-Patch932: pci-Always-set-prefetchable-base-limit-upper32-registers.patch
-Patch933: mm-Memory-tracking-for-Stratus.patch
-Patch934: redhat-enable-Memory-tracking-for-Stratus.patch
-Patch935: drm-radeon-possible-security-issue.patch
-Patch936: redhat-tagging-2-6-32-12-el6.patch
-Patch937: redhat-updating-lastcommit-for-2-6-32-12.patch
-Patch938: mm-Memory-tracking-for-Stratus-2.patch
-Patch939: kdump-backport-upstream-ppc64-kcrctab-fixes.patch
-Patch940: x86-acpi-Export-acpi_pci_irq_-add-del-_prt.patch
-Patch941: kvm-Fix-race-between-APIC-TMR-and-IRR.patch
-Patch942: kvm-x86-Fix-host_mapping_level.patch
-Patch943: kvm-MMU-bail-out-pagewalk-on-kvm_read_guest-error.patch
-Patch944: kvm-x86-Fix-probable-memory-leak-of-vcpu-arch-mce_banks.patch
-Patch945: kvm-x86-Fix-leak-of-free-lapic-date-in-kvm_arch_vcpu_init.patch
-Patch946: kvm-only-allow-one-gsi-per-fd.patch
-Patch947: kvm-properly-check-max-PIC-pin-in-irq-route-setup.patch
-Patch948: kvm-eventfd-allow-atomic-read-and-waitqueue-remove.patch
-Patch949: kvm-fix-spurious-interrupt-with-irqfd.patch
-Patch950: x86-Add-AMD-Node-ID-MSR-support.patch
-Patch951: x86-Fix-crash-when-profiling-more-than-28-events.patch
-Patch952: virtio-console-comment-cleanup.patch
-Patch953: virtio-console-statically-initialize-virtio_cons.patch
-Patch954: virtio-hvc_console-make-the-ops-pointer-const.patch
-Patch955: virtio-hvc_console-Remove-__devinit-annotation-from-hvc_alloc.patch
-Patch956: virtio-console-We-support-only-one-device-at-a-time.patch
-Patch957: virtio-console-port-encapsulation.patch
-Patch958: virtio-console-encapsulate-buffer-information-in-a-struct.patch
-Patch959: virtio-console-ensure-add_inbuf-can-work-for-multiple-ports-as-well.patch
-Patch960: virtio-console-introduce-a-get_inbuf-helper-to-fetch-bufs-from-in_vq.patch
-Patch961: virtio-console-use-vdev-priv-to-avoid-accessing-global-var.patch
-Patch962: virtio-console-don-t-assume-a-single-console-port.patch
-Patch963: virtio-console-remove-global-var.patch
-Patch964: virtio-console-struct-ports-for-multiple-ports-per-device.patch
-Patch965: virtio-console-ensure-console-size-is-updated-on-hvc-open.patch
-Patch966: virtio-console-Separate-out-console-specific-data-into-a-separate-struct.patch
-Patch967: virtio-console-Separate-out-console-init-into-a-new-function.patch
-Patch968: virtio-console-Separate-out-find_vqs-operation-into-a-different-function.patch
-Patch969: virtio-console-Introduce-function-to-hand-off-data-from-host-to-readers.patch
-Patch970: virtio-console-Introduce-a-send_buf-function-for-a-common-path-for-sending-data-to-host.patch
-Patch971: virtio-console-Add-a-new-MULTIPORT-feature-support-for-generic-ports.patch
-Patch972: virtio-console-Prepare-for-writing-to-reading-from-userspace-buffers.patch
-Patch973: virtio-console-Associate-each-port-with-a-char-device.patch
-Patch974: virtio-console-Add-file-operations-to-ports-for-open-read-write-poll.patch
-Patch975: virtio-console-Ensure-only-one-process-can-have-a-port-open-at-a-time.patch
-Patch976: virtio-console-Register-with-sysfs-and-create-a-name-attribute-for-ports.patch
-Patch977: virtio-console-Remove-cached-data-on-port-close.patch
-Patch978: virtio-console-Handle-port-hot-plug.patch
-Patch979: virtio-Add-ability-to-detach-unused-buffers-from-vrings.patch
-Patch980: virtio-hvc_console-Export-GPL-ed-hvc_remove.patch
-Patch981: virtio-console-Add-ability-to-hot-unplug-ports.patch
-Patch982: virtio-console-Add-debugfs-files-for-each-port-to-expose-debug-info.patch
-Patch983: virtio-console-show-error-message-if-hvc_alloc-fails-for-console-ports.patch
-Patch984: redhat-tagging-2-6-32-13-el6.patch
-Patch985: redhat-updating-lastcommit-for-2-6-32-13.patch
-Patch986: uv-x86-Add-function-retrieving-node-controller-revision-number.patch
-Patch987: uv-x86-Ensure-hub-revision-set-for-all-ACPI-modes.patch
-Patch988: s390x-cio-channel-path-vary-operation-has-no-effect.patch
-Patch989: s390x-zcrypt-Do-not-remove-coprocessor-in-case-of-error-8-72.patch
-Patch990: s390x-dasd-Fix-null-pointer-in-s390dbf-and-discipline-checking.patch
-Patch991: redhat-Enable-oprofile-multiplexing-on-x86_64-and-x86-architectures-only.patch
-Patch992: netdrv-update-tg3-to-version-3-106-and-fix-panic.patch
-Patch993: redhat-disable-CONFIG_OPTIMIZE_FOR_SIZE.patch
-Patch994: s390x-dasd-fix-online-offline-race.patch
-Patch995: redhat-tagging-2-6-32-14-el6.patch
-Patch996: redhat-updating-lastcommit-for-2-6-32-14.patch
-Patch997: gfs-GFS2-Fix-refcnt-leak-on-gfs2_follow_link-error-path.patch
-Patch998: gfs-GFS2-Use-GFP_NOFS-for-alloc-structure.patch
-Patch999: gfs-GFS2-Use-MAX_LFS_FILESIZE-for-meta-inode-size.patch
-Patch1000: gfs-GFS2-Wait-for-unlock-completion-on-umount.patch
-Patch1001: gfs-GFS2-Extend-umount-wait-coverage-to-full-glock-lifetime.patch
-Patch1002: x86-intr-remap-generic-support-for-remapping-HPET-MSIs.patch
-Patch1003: x86-arch-specific-support-for-remapping-HPET-MSIs.patch
-Patch1004: x86-Disable-HPET-MSI-on-ATI-SB700-SB800.patch
-Patch1005: fs-ext4-fix-type-of-offset-in-ext4_io_end.patch
-Patch1006: redhat-disable-CONFIG_DEBUG_PERF_USE_VMALLOC-on-production-kernels.patch
-Patch1007: x86-fix-Add-AMD-Node-ID-MSR-support.patch
-Patch1008: redhat-config-disable-CONFIG_VMI.patch
-Patch1009: quota-64-bit-quota-format-fixes.patch
-Patch1010: block-cfq-Do-not-idle-on-async-queues-and-drive-deeper-WRITE-depths.patch
-Patch1011: block-blk-cgroup-Fix-lockdep-warning-of-potential-deadlock-in-blk-cgroup.patch
-Patch1012: redhat-tagging-2-6-32-15-el6.patch
-Patch1013: redhat-updating-lastcommit-for-2-6-32-15.patch
-Patch1014: redhat-x86_64-enable-function-tracers.patch
-Patch1015: nfs-nfsd41-nfsd4_decode_compound-does-not-recognize-all-ops.patch
-Patch1016: nfs-nfsd4-Use-FIRST_NFS4_OP-in-nfsd4_decode_compound.patch
-Patch1017: nfs-nfsd-use-vfs_fsync-for-non-directories.patch
-Patch1018: nfs-nfsd41-Create-the-recovery-entry-for-the-NFSv4-1-client.patch
-Patch1019: nfs-nfsd-4-1-has-an-rfc-number.patch
-Patch1020: nfs-SUNRPC-Use-rpc_pton-in-ip_map_parse.patch
-Patch1021: nfs-NFSD-Support-AF_INET6-in-svc_addsock-function.patch
-Patch1022: nfs-SUNRPC-Bury-ifdef-IPV6-in-svc_create_xprt.patch
-Patch1023: nfs-SUNRPC-NFS-kernel-APIs-shouldn-t-return-ENOENT-for-transport-not-found.patch
-Patch1024: nfs-NFSD-Create-PF_INET6-listener-in-write_ports.patch
-Patch1025: nfs-nfs41-Adjust-max-cache-response-size-value.patch
-Patch1026: nfs-nfs41-Check-slot-table-for-referring-calls.patch
-Patch1027: nfs-nfs41-Process-callback-s-referring-call-list.patch
-Patch1028: nfs-nfs41-fix-wrong-error-on-callback-header-xdr-overflow.patch
-Patch1029: nfs-nfs41-directly-encode-back-channel-error.patch
-Patch1030: nfs-nfs41-remove-uneeded-checks-in-callback-processing.patch
-Patch1031: nfs-nfs41-prepare-for-back-channel-drc.patch
-Patch1032: nfs-nfs41-back-channel-drc-minimal-implementation.patch
-Patch1033: nfs-nfs41-implement-cb_recall_slot.patch
-Patch1034: nfs-nfs41-resize-slot-table-in-reset.patch
-Patch1035: nfs-nfs41-fix-nfs4_callback_recallslot.patch
-Patch1036: nfs-nfs41-clear-NFS4CLNT_RECALL_SLOT-bit-on-session-reset.patch
-Patch1037: nfs-nfs41-cleanup-callback-code-to-use-__be32-type.patch
-Patch1038: nfs-Fix-a-reference-leak-in-nfs_wb_cancel_page.patch
-Patch1039: nfs-Try-to-commit-unstable-writes-in-nfs_release_page.patch
-Patch1040: nfs-Make-nfs_commitdata_release-static.patch
-Patch1041: nfs-Avoid-warnings-when-CONFIG_NFS_V4-n.patch
-Patch1042: nfs-Ensure-that-the-NFSv4-locking-can-recover-from-stateid-errors.patch
-Patch1043: nfs-NFSv4-Don-t-allow-posix-locking-against-servers-that-don-t-support-it.patch
-Patch1044: nfs-NFSv4-1-Don-t-call-nfs4_schedule_state_recovery-unnecessarily.patch
-Patch1045: nfs-Ensure-that-we-handle-NFS4ERR_STALE_STATEID-correctly.patch
-Patch1046: nfs-sunrpc-cache-fix-module-refcnt-leak-in-a-failure-path.patch
-Patch1047: scsi-lpfc-Update-from-8-3-4-to-8-3-5-4-FC-FCoE.patch
-Patch1048: dm-fix-kernel-panic-at-releasing-bio-on-recovery-failed-region.patch
-Patch1049: dm-dm-raid1-fix-deadlock-at-suspending-failed-device.patch
-Patch1050: vhost-fix-high-32-bit-in-FEATURES-ioctls.patch
-Patch1051: vhost-prevent-modification-of-an-active-ring.patch
-Patch1052: vhost-add-access_ok-checks.patch
-Patch1053: vhost-make-default-mapping-empty-by-default.patch
-Patch1054: vhost-access-check-thinko-fixes.patch
-Patch1055: vhost-vhost-net-comment-use-of-invalid-fd-when-setting-vhost-backend.patch
-Patch1056: vhost-vhost-net-defer-f-private_data-until-setup-succeeds.patch
-Patch1057: vhost-fix-TUN-m-VHOST_NET-y.patch
-Patch1058: kvm-emulate-accessed-bit-for-EPT.patch
-Patch1059: net-nf_conntrack-fix-memory-corruption.patch
-Patch1060: nfs-nfs4-handle-EKEYEXPIRED-errors-from-RPC-layer.patch
-Patch1061: nfs-sunrpc-parse-and-return-errors-reported-by-gssd.patch
-Patch1062: nfs-handle-NFSv2-EKEYEXPIRED-returns-from-RPC-layer-appropriately.patch
-Patch1063: nfs-nfs-handle-NFSv3-EKEYEXPIRED-errors-as-we-would-EJUKEBOX.patch
-Patch1064: oprofile-Support-Nehalem-EX-CPU-in-Oprofile.patch
-Patch1065: mm-define-MADV_HUGEPAGE.patch
-Patch1066: mm-add-a-compound_lock.patch
-Patch1067: mm-alter-compound-get_page-put_page.patch
-Patch1068: mm-update-futex-compound-knowledge.patch
-Patch1069: mm-clear-compound-mapping.patch
-Patch1070: mm-add-native_set_pmd_at.patch
-Patch1071: mm-add-pmd-paravirt-ops.patch
-Patch1072: mm-no-paravirt-version-of-pmd-ops.patch
-Patch1073: mm-export-maybe_mkwrite.patch
-Patch1074: mm-comment-reminder-in-destroy_compound_page.patch
-Patch1075: mm-config_transparent_hugepage.patch
-Patch1076: mm-special-pmd_trans_-functions.patch
-Patch1077: mm-add-pmd-mangling-generic-functions.patch
-Patch1078: mm-add-pmd-mangling-functions-to-x86.patch
-Patch1079: mm-bail-out-gup_fast-on-splitting-pmd.patch
-Patch1080: mm-pte-alloc-trans-splitting.patch
-Patch1081: mm-add-pmd-mmu_notifier-helpers.patch
-Patch1082: mm-clear-page-compound.patch
-Patch1083: mm-add-pmd_huge_pte-to-mm_struct.patch
-Patch1084: mm-split_huge_page_mm-vma.patch
-Patch1085: mm-split_huge_page-paging.patch
-Patch1086: mm-clear_huge_page-fix.patch
-Patch1087: mm-clear_copy_huge_page.patch
-Patch1088: mm-kvm-mmu-transparent-hugepage-support.patch
-Patch1089: mm-backport-page_referenced-microoptimization.patch
-Patch1090: mm-introduce-_GFP_NO_KSWAPD.patch
-Patch1091: mm-dont-alloc-harder-for-gfp-nomemalloc-even-if-nowait.patch
-Patch1092: mm-transparent-hugepage-core.patch
-Patch1093: mm-verify-pmd_trans_huge-isnt-leaking.patch
-Patch1094: mm-madvise-MADV_HUGEPAGE.patch
-Patch1095: mm-pmd_trans_huge-migrate-bugcheck.patch
-Patch1096: mm-memcg-compound.patch
-Patch1097: mm-memcg-huge-memory.patch
-Patch1098: mm-transparent-hugepage-vmstat.patch
-Patch1099: mm-introduce-khugepaged.patch
-Patch1100: mm-hugepage-redhat-customization.patch
-Patch1101: mm-remove-madvise-MADV_HUGEPAGE.patch
-Patch1102: uv-PCI-update-pci_set_vga_state-to-call-arch-functions.patch
-Patch1103: pci-update-pci_set_vga_state-to-call-arch-functions.patch
-Patch1104: uv-x86_64-update-uv-arch-to-target-legacy-VGA-I-O-correctly.patch
-Patch1105: gpu-vgaarb-fix-vga-arbiter-to-accept-PCI-domains-other-than-0.patch
-Patch1106: uv-vgaarb-add-user-selectability-of-the-number-of-gpus-in-a-system.patch
-Patch1107: s390x-ctcm-lcs-claw-remove-cu3088-layer.patch
-Patch1108: uv-x86-Fix-RTC-latency-bug-by-reading-replicated-cachelines.patch
-Patch1109: pci-PCI-ACS-support-functions.patch
-Patch1110: pci-Enablement-of-PCI-ACS-control-when-IOMMU-enabled-on-system.patch
-Patch1111: net-do-not-check-CAP_NET_RAW-for-kernel-created-sockets.patch
-Patch1112: fs-inotify-fix-inotify-WARN-and-compatibility-issues.patch
-Patch1113: redhat-kABI-updates-02-11.patch
-Patch1114: mm-fix-BUG-s-caused-by-the-transparent-hugepage-patch.patch
-Patch1115: redhat-Allow-only-particular-kernel-rpms-to-be-built.patch
-Patch1116: nfs-Fix-a-bug-in-nfs_fscache_release_page.patch
-Patch1117: nfs-Remove-a-redundant-check-for-PageFsCache-in-nfs_migrate_page.patch
-Patch1118: redhat-tagging-2-6-32-16-el6.patch
-Patch1119: redhat-updating-lastcommit-for-2-6-32-16.patch
-Patch1120: redhat-find-provides-also-require-python.patch
-Patch1121: ppc-Add-kdump-support-to-Collaborative-Memory-Manager.patch
-Patch1122: gfs-GFS2-problems-on-single-node-cluster.patch
-Patch1123: selinux-print-the-module-name-when-SELinux-denies-a-userspace-upcall.patch
-Patch1124: kernel-Prevent-futex-user-corruption-to-crash-the-kernel.patch
-Patch1125: kvm-PIT-control-word-is-write-only.patch
-Patch1126: virt-virtio_blk-add-block-topology-support.patch
-Patch1127: redhat-make-CONFIG_CRASH-built-in.patch
-Patch1128: mm-anon_vma-linking-changes-to-improve-multi-process-scalability.patch
-Patch1129: mm-anon_vma-locking-updates-for-transparent-hugepage-code.patch
-Patch1130: dm-stripe-avoid-divide-by-zero-with-invalid-stripe-count.patch
-Patch1131: dm-log-userspace-fix-overhead_size-calcuations.patch
-Patch1132: dm-mpath-fix-stall-when-requeueing-io.patch
-Patch1133: dm-raid1-fail-writes-if-errors-are-not-handled-and-log-fails.patch
-Patch1134: kernel-time-Implement-logarithmic-time-accumalation.patch
-Patch1135: kernel-time-Remove-xtime_cache.patch
-Patch1136: watchdog-Add-support-for-iTCO-watchdog-on-Ibex-Peak-chipset.patch
-Patch1137: block-fix-bio_add_page-for-non-trivial-merge_bvec_fn-case.patch
-Patch1138: block-freeze_bdev-don-t-deactivate-successfully-frozen-MS_RDONLY-sb.patch
-Patch1139: x86-nmi_watchdog-enable-by-default-on-RHEL-6.patch
-Patch1140: x86-x86-32-clean-up-rwsem-inline-asm-statements.patch
-Patch1141: x86-clean-up-rwsem-type-system.patch
-Patch1142: x86-x86-64-support-native-xadd-rwsem-implementation.patch
-Patch1143: x86-x86-64-rwsem-64-bit-xadd-rwsem-implementation.patch
-Patch1144: x86-x86-64-rwsem-Avoid-store-forwarding-hazard-in-__downgrade_write.patch
-Patch1145: nfs-mount-nfs-Unknown-error-526.patch
-Patch1146: s390-zfcp-cancel-all-pending-work-for-a-to-be-removed-zfcp_port.patch
-Patch1147: s390-zfcp-report-BSG-errors-in-correct-field.patch
-Patch1148: s390-qdio-prevent-kernel-bug-message-in-interrupt-handler.patch
-Patch1149: s390-qdio-continue-polling-for-buffer-state-ERROR.patch
-Patch1150: s390-hvc_iucv-allocate-IUCV-send-receive-buffers-in-DMA-zone.patch
-Patch1151: redhat-whitelists-intentional-kABI-Module-kabi-rebase-pre-beta1-for-VM-bits.patch
-Patch1152: redhat-tagging-2-6-32-17-el6.patch
-Patch1153: redhat-updating-lastcommit-for-2-6-32-17.patch
-Patch1154: redhat-disable-GFS2-on-s390x.patch
-Patch1155: redhat-disable-XFS-on-all-arches-except-x86_64.patch
-Patch1156: redhat-disable-all-the-filesystems-we-aren-t-going-to-support-and-fix-ext3-4.patch
-Patch1157: redhat-run-new-kernel-pkg-on-posttrans.patch
-Patch1158: redhat-fix-typo-on-redhat-Makefile.patch
-Patch1159: kvm-virtio-console-Allow-sending-variable-sized-buffers-to-host-efault-on-copy_from_user-err.patch
-Patch1160: kvm-virtio-console-return-efault-for-fill_readbuf-if-copy_to_user-fails.patch
-Patch1161: kvm-virtio-console-outbufs-are-no-longer-needed.patch
-Patch1162: kvm-virtio-Initialize-vq-data-entries-to-NULL.patch
-Patch1163: kvm-virtio-console-update-Red-Hat-copyright-for-2010.patch
-Patch1164: kvm-virtio-console-Ensure-no-memleaks-in-case-of-unused-buffers.patch
-Patch1165: kvm-virtio-console-Add-ability-to-remove-module.patch
-Patch1166: kvm-virtio-console-Error-out-if-we-can-t-allocate-buffers-for-control-queue.patch
-Patch1167: kvm-virtio-console-Fill-ports-entire-in_vq-with-buffers.patch
-Patch1168: kvm-Add-MAINTAINERS-entry-for-virtio_console.patch
-Patch1169: kvm-fix-large-packet-drops-on-kvm-hosts-with-ipv6.patch
-Patch1170: scsi-megaraid_sas-fix-for-32bit-apps.patch
-Patch1171: x86-AES-PCLMUL-Instruction-support-Add-PCLMULQDQ-accelerated-implementation.patch
-Patch1172: x86-AES-PCLMUL-Instruction-support-Various-small-fixes-for-AES-PCMLMUL-and-generate-byte-code-for-some-new-instructions-via-gas-macro.patch
-Patch1173: x86-AES-PCLMUL-Instruction-support-Use-gas-macro-for-AES-NI-instructions.patch
-Patch1174: x86-AES-PCLMUL-Instruction-support-Various-fixes-for-AES-NI-and-PCLMMUL.patch
-Patch1175: kvm-x86-emulator-Add-push-pop-sreg-instructions.patch
-Patch1176: kvm-x86-emulator-Introduce-No64-decode-option.patch
-Patch1177: kvm-x86-emulator-Add-group8-instruction-decoding.patch
-Patch1178: kvm-x86-emulator-Add-group9-instruction-decoding.patch
-Patch1179: kvm-x86-emulator-Add-Virtual-8086-mode-of-emulation.patch
-Patch1180: kvm-x86-emulator-fix-memory-access-during-x86-emulation.patch
-Patch1181: kvm-x86-emulator-Check-IOPL-level-during-io-instruction-emulation.patch
-Patch1182: kvm-x86-emulator-Fix-popf-emulation.patch
-Patch1183: kvm-x86-emulator-Check-CPL-level-during-privilege-instruction-emulation.patch
-Patch1184: kvm-x86-emulator-Add-LOCK-prefix-validity-checking.patch
-Patch1185: kvm-x86-emulator-code-style-cleanup.patch
-Patch1186: kvm-x86-emulator-Fix-properties-of-instructions-in-group-1_82.patch
-Patch1187: kvm-inject-UD-in-64bit-mode-from-instruction-that-are-not-valid-there.patch
-Patch1188: kvm-x86-emulator-X86EMUL-macro-replacements-from-do_fetch_insn_byte-to-x86_decode_insn.patch
-Patch1189: kvm-x86-emulator-X86EMUL-macro-replacements-x86_emulate_insn-and-its-helpers.patch
-Patch1190: kvm-x86-emulator-Fix-x86_emulate_insn-not-to-use-the-variable-rc-for-non-X86EMUL-values.patch
-Patch1191: kvm-x86-emulator-Forbid-modifying-CS-segment-register-by-mov-instruction.patch
-Patch1192: kvm-Fix-load_guest_segment_descriptor-to-inject-page-fault.patch
-Patch1193: kvm-Fix-segment-descriptor-loading.patch
-Patch1194: kvm-Fix-emulate_sys-call-enter-exit-s-fault-handling.patch
-Patch1195: netdrv-ixgbe-prevent-speculative-processing-of-descriptors.patch
-Patch1196: x86-nmi_watchdog-use-__cpuinit-for-nmi_watchdog_default.patch
-Patch1197: net-netfilter-nf_conntrack-per-netns-nf_conntrack_cachep.patch
-Patch1198: scsi-mpt2sas-fix-missing-initialization.patch
-Patch1199: dm-raid45-target-constructor-error-path-oops-fix.patch
-Patch1200: netdrv-cxgb3-add-memory-barriers.patch
-Patch1201: mm-fix-anon_vma-locking-updates-for-transparent-hugepage-code.patch
-Patch1202: mm-Fix-hugetlb-c-clear_huge_page-parameter.patch
-Patch1203: gfs2-print-glock-numbers-in-hex.patch
-Patch1204: selinux-netlabel-fix-corruption-of-SELinux-MLS-categories-127.patch
-Patch1205: ata-ahci-disable-FPDMA-auto-activate-optimization-on-NVIDIA-AHCI.patch
-Patch1206: scsi-lpfc-Update-from-8-3-5-4-to-8-3-5-5-FC-FCoE.patch
-Patch1207: scsi-pmcraid-bug-fixes-from-upstream.patch
-Patch1208: mm-Fix-potential-crash-with-sys_move_pages.patch
-Patch1209: s390x-qeth-avoid-recovery-during-device-online-setting.patch
-Patch1210: kernel-Fix-SMT-scheduler-regression-in-find_busiest_queue.patch
-Patch1211: drm-bring-drm-core-ttm-fb-layer-fixes-in-from-upstream.patch
-Patch1212: s390x-vdso-glibc-does-not-use-vdso-functions.patch
-Patch1213: kernel-sched-Fix-SCHED_MC-regression-caused-by-change-in-sched-cpu_power.patch
-Patch1214: dvb-Fix-endless-loop-when-decoding-ULE-at-dvb-core.patch
-Patch1215: drm-radeon-kms-bring-all-v2-6-33-fixes-into-EL6-kernel.patch
-Patch1216: redhat-Change-RPM-name-format-for-custom-builds.patch
-Patch1217: uv-Have-mmu_notifiers-use-SRCU-so-they-may-safely-schedule.patch
-Patch1218: uv-Fix-unmap_vma-bug-related-to-mmu_notifiers.patch
-Patch1219: net-bug-fix-for-vlan-gro-issue.patch
-Patch1220: redhat-add-suport-for-rhts-testing.patch
-Patch1221: redhat-add-filesystem-test.patch
-Patch1222: vhost-vhost-net-switch-to-smp-barriers.patch
-Patch1223: vhost-logging-thinko-fix.patch
-Patch1224: vhost-initialize-log-eventfd-context-pointer.patch
-Patch1225: vhost-fix-get_user_pages_fast-error-handling.patch
-Patch1226: vhost-vhost-net-restart-tx-poll-on-sk_sndbuf-full.patch
-Patch1227: x86-Intel-Cougar-Point-chipset-support.patch
-Patch1228: drm-Remove-loop-in-IronLake-graphics-interrupt-handler.patch
-Patch1229: scsi-scsi_dh_emc-fix-mode-select-setup.patch
-Patch1230: scsi-Add-netapp-to-scsi-dh-alua-dev-list.patch
-Patch1231: virt-hvc_console-Fix-race-between-hvc_close-and-hvc_remove.patch
-Patch1232: kernel-time-revert-cc2f92ad1d0e03fe527e8ccfc1f918c368964dc8.patch
-Patch1233: redhat-infiniband-remove-all-infiniband-symbols-from-RHEL6-kABI.patch
-Patch1234: redhat-kABI-Update-the-RHEL6-kABI-for-kernel-2-6-32-18-el6.patch
-Patch1235: redhat-tagging-2-6-32-18-el6.patch
-Patch1236: redhat-updating-lastcommit-for-2-6-32-18.patch
-Patch1237: mm-Switch-to-SLAB.patch
-Patch1238: redhat-kABI-Update-the-kABI-for-2-6-18-el6.patch
+Source56: config-x86_64-nodebug-rhel
+Source57: config-s390x-rhel
+Source58: config-powerpc64-kdump
+Source59: config-i686-debug-rhel
+Source60: config-nodebug
+Source61: config-s390x
+Source62: config-powerpc-generic-rhel
+Source63: config-ia64-generic-rhel
+Source64: config-s390x-kdump
+Source65: config-nodebug-rhel
+Source66: config-i686-nodebug
+Source67: config-i686-debug
+Source68: config-powerpc-generic
+Source69: config-x86_64-debug
+Source70: config-framepointer
+Source71: config-i686-rhel
+Source72: config-i686-nodebug-rhel
+Source73: config-x86_64-nodebug
+Source74: config-powerpc64-rhel
+Source75: config-debug
+Source76: config-x86_64-generic
+Source77: config-x86_64-debug-rhel
+Source78: config-x86_64-generic-rhel
+Source79: config-debug-rhel
+Source80: config-generic-rhel
+Source81: config-powerpc64
 
 # empty final patch file to facilitate testing of kernel patches
-Patch99999: linux-kernel-test.patch
+Patch999999: linux-kernel-test.patch
 
 BuildRoot: %{_tmppath}/kernel-%{KVERREL}-root
 
@@ -2040,12 +794,6 @@ required only on machines which will use the kexec-based kernel crash dump
 mechanism.
 
 
-%define variant_summary The Linux kernel compiled with CONFIG_FRAME_POINTER
-%kernel_variant_package framepointer
-%description framepointer
-This is a TEMPORARY package with the CONFIG_FRAME_POINTER.
-
-
 %prep
 # do a few sanity-checks for --with *only builds
 %if %{with_baseonly}
@@ -2075,11 +823,6 @@ ApplyPatch()
   if [ ! -f $RPM_SOURCE_DIR/$patch ]; then
     exit 1
   fi
-  # check if the patch is empty
-  if [ -z "$(lsdiff $RPM_SOURCE_DIR/$patch)" ]; then
-    echo "WARNING: empty patch";
-    return;
-  fi
   case "$patch" in
   *.bz2) bunzip2 < "$RPM_SOURCE_DIR/$patch" | $patch_command ${1+"$@"} ;;
   *.gz) gunzip < "$RPM_SOURCE_DIR/$patch" | $patch_command ${1+"$@"} ;;
@@ -2107,104 +850,12 @@ ApplyOptionalPatch()
    make INSTALL_FW_PATH=$RPM_BUILD_ROOT/lib/firmware firmware_install \
    mv .config.firmware_save .config
 
-# First we unpack the kernel tarball.
-# If this isn't the first make prep, we use links to the existing clean tarball
-# which speeds things up quite a bit.
-
-# Update to latest upstream.
-%if 0%{?released_kernel}
-%define vanillaversion 2.6.%{base_sublevel}
-# non-released_kernel case
-%else
-%if 0%{?rcrev}
-%define vanillaversion 2.6.%{upstream_sublevel}-rc%{rcrev}
-%if 0%{?gitrev}
-%define vanillaversion 2.6.%{upstream_sublevel}-rc%{rcrev}-git%{gitrev}
-%endif
-%else
-# pre-{base_sublevel+1}-rc1 case
-%if 0%{?gitrev}
-%define vanillaversion 2.6.%{base_sublevel}-git%{gitrev}
-%else
-%define vanillaversion 2.6.%{base_sublevel}
-%endif
-%endif
-%endif
-
-# We can share hardlinked source trees by putting a list of
-# directory names of the CVS checkouts that we want to share
-# with in .shared-srctree. (Full pathnames are required.)
-[ -f .shared-srctree ] && sharedirs=$(cat .shared-srctree)
-
-if [ ! -d kernel-%{kversion}/vanilla-%{vanillaversion} ]; then
-
-  if [ -d kernel-%{kversion}/vanilla-%{kversion} ]; then
-
-    cd kernel-%{kversion}
-
-    # Any vanilla-* directories other than the base one are stale.
-    for dir in vanilla-*; do
-      [ "$dir" = vanilla-%{kversion} ] || rm -rf $dir &
-    done
-
-  else
-
-    # Ok, first time we do a make prep.
-    rm -f pax_global_header
-    for sharedir in $sharedirs ; do
-      if [[ ! -z $sharedir  &&  -d $sharedir/kernel-%{kversion}/vanilla-%{kversion} ]] ; then
-        break
-      fi
-    done
-    if [[ ! -z $sharedir  &&  -d $sharedir/kernel-%{kversion}/vanilla-%{kversion} ]] ; then
-%setup -q -n kernel-%{kversion} -c -T
-      cp -rl $sharedir/kernel-%{kversion}/vanilla-%{kversion} .
-    else
+if [ ! -d kernel-%{kversion}/vanilla-%{kversion}/ ]; then
+	rm -f pax_global_header;
 %setup -q -n kernel-%{kversion} -c
-      mv linux-%{kversion} vanilla-%{kversion}
-    fi
-
-  fi
-
-%if "%{kversion}" != "%{vanillaversion}"
-
-  for sharedir in $sharedirs ; do
-    if [[ ! -z $sharedir  &&  -d $sharedir/kernel-%{kversion}/vanilla-%{vanillaversion} ]] ; then
-      break
-    fi
-  done
-  if [[ ! -z $sharedir  &&  -d $sharedir/kernel-%{kversion}/vanilla-%{vanillaversion} ]] ; then
-
-    cp -rl $sharedir/kernel-%{kversion}/vanilla-%{vanillaversion} .
-
-  else
-
-    cp -rl vanilla-%{kversion} vanilla-%{vanillaversion}
-    cd vanilla-%{vanillaversion}
-
-# Update vanilla to the latest upstream.
-# (non-released_kernel case only)
-%if 0%{?rcrev}
-    ApplyPatch patch-2.6.%{upstream_sublevel}-rc%{rcrev}.bz2
-%if 0%{?gitrev}
-    ApplyPatch patch-2.6.%{upstream_sublevel}-rc%{rcrev}-git%{gitrev}.bz2
-%endif
-%else
-# pre-{base_sublevel+1}-rc1 case
-%if 0%{?gitrev}
-    ApplyPatch patch-2.6.%{base_sublevel}-git%{gitrev}.bz2
-%endif
-%endif
-
-    cd ..
-
-  fi
-
-%endif
-
+	mv linux-%{kversion} vanilla-%{kversion};
 else
-  # We already have a vanilla dir.
-  cd kernel-%{kversion}
+	cd kernel-%{kversion}/;
 fi
 
 if [ -d linux-%{kversion}.%{_target_cpu} ]; then
@@ -2215,7 +866,7 @@ if [ -d linux-%{kversion}.%{_target_cpu} ]; then
   rm -rf deleteme.%{_target_cpu} &
 fi
 
-cp -rl vanilla-%{vanillaversion} linux-%{kversion}.%{_target_cpu}
+cp -rl vanilla-%{kversion} linux-%{kversion}.%{_target_cpu}
 
 cd linux-%{kversion}.%{_target_cpu}
 
@@ -2225,1246 +876,6 @@ cp %{SOURCE15} %{SOURCE1} %{SOURCE16} %{SOURCE17} %{SOURCE18} .
 
 # Dynamically generate kernel .config files from config-* files
 make -f %{SOURCE20} VERSION=%{version} configs
-
-ApplyPatch Fedora-redhat-introduce-nonint_oldconfig-target.patch
-ApplyPatch Fedora-build-introduce-AFTER_LINK-variable.patch
-ApplyPatch Fedora-utrace-introduce-utrace-implementation.patch
-ApplyPatch Fedora-hwmon-add-VIA-hwmon-temperature-sensor-support.patch
-ApplyPatch Fedora-powerpc-add-modalias_show-operation.patch
-ApplyPatch Fedora-execshield-introduce-execshield.patch
-ApplyPatch Fedora-nfsd4-proots.patch
-ApplyPatch Fedora-nfs-make-nfs4-callback-hidden.patch
-ApplyPatch Fedora-usb-Allow-drivers-to-enable-USB-autosuspend-on-a-per-device-basis.patch
-ApplyPatch Fedora-usb-enable-autosuspend-by-default-on-qcserial.patch
-ApplyPatch Fedora-usb-enable-autosuspend-on-UVC-by-default.patch
-ApplyPatch Fedora-acpi-Disable-brightness-switch-by-default.patch
-ApplyPatch Fedora-acpi-Disable-firmware-video-brightness-change-by-default.patch
-ApplyPatch Fedora-debug-print-common-struct-sizes-at-boot-time.patch
-ApplyPatch Fedora-x86-add-option-to-control-the-NMI-watchdog-timeout.patch
-ApplyPatch Fedora-debug-display-tainted-information-on-other-places.patch
-ApplyPatch Fedora-debug-add-calls-to-print_tainted-on-spinlock-functions.patch
-ApplyPatch Fedora-debug-add-would_have_oomkilled-procfs-ctl.patch
-ApplyPatch Fedora-debug-always-inline-kzalloc.patch
-ApplyPatch Fedora-pci-add-config-option-to-control-the-default-state-of-PCI-MSI-interrupts.patch
-ApplyPatch Fedora-pci-sets-PCIE-ASPM-default-policy-to-POWERSAVE.patch
-ApplyPatch Fedora-sound-disables-hda-beep-by-default.patch
-ApplyPatch Fedora-sound-hda-intel-prealloc-4mb-dmabuffer.patch
-ApplyPatch Fedora-input-remove-unwanted-messages-on-spurious-events.patch
-ApplyPatch Fedora-floppy-remove-the-floppy-pnp-modalias.patch
-ApplyPatch Fedora-input-remove-pcspkr-modalias.patch
-ApplyPatch Fedora-serial-Enable-higher-baud-rates-for-16C95x.patch
-ApplyPatch Fedora-serio-disable-error-messages-when-i8042-isn-t-found.patch
-ApplyPatch Fedora-pci-silence-some-PCI-resource-allocation-errors.patch
-ApplyPatch Fedora-fb-disable-fbcon-logo-with-parameter.patch
-ApplyPatch Fedora-crash-add-crash-driver.patch
-ApplyPatch Fedora-pci-cacheline-sizing.patch
-ApplyPatch Fedora-e1000-add-quirk-for-ich9.patch
-ApplyPatch Fedora-drm-intel-big-hammer.patch
-ApplyPatch Fedora-acpi-be-less-verbose-about-old-BIOSes.patch
-ApplyPatch Fedora-rfkill-add-support-to-a-key-to-control-all-radios.patch
-ApplyPatch redhat-adding-redhat-directory.patch
-ApplyPatch redhat-Importing-config-options.patch
-ApplyPatch redhat-s390x-adding-zfcpdump-application-used-by-s390x-kdump-kernel.patch
-ApplyPatch redhat-Include-FIPS-required-checksum-of-the-kernel-image.patch
-ApplyPatch redhat-Silence-tagging-messages-by-rh-release.patch
-ApplyPatch redhat-Disabling-debug-options-for-beta.patch
-ApplyPatch redhat-kernel-requires-udev-145-11-or-newer.patch
-ApplyPatch redhat-tagging-2-6-31-50-el6.patch
-ApplyPatch redhat-updating-lastcommit-for-2-6-31-50.patch
-ApplyPatch block-get-rid-of-the-WRITE_ODIRECT-flag.patch
-ApplyPatch block-aio-implement-request-batching.patch
-ApplyPatch kdump-x86-add-CONFIG_KEXEC_AUTO_RESERVE.patch
-ApplyPatch kdump-x86-implement-crashkernel-auto.patch
-ApplyPatch kdump-ia64-add-CONFIG_KEXEC_AUTO_RESERVE.patch
-ApplyPatch kdump-ia64-implement-crashkernel-auto.patch
-ApplyPatch kdump-powerpc-add-CONFIG_KEXEC_AUTO_RESERVE.patch
-ApplyPatch kdump-powerpc-implement-crashkernel-auto.patch
-ApplyPatch kdump-doc-update-the-kdump-document.patch
-ApplyPatch kdump-kexec-allow-to-shrink-reserved-memory.patch
-ApplyPatch kernel-Set-panic_on_oops-to-1.patch
-ApplyPatch redhat-fix-BZ-and-CVE-info-printing-on-changelog-when-HIDE_REDHAT-is-enabled.patch
-ApplyPatch redhat-tagging-2-6-31-51-el6.patch
-ApplyPatch redhat-updating-lastcommit-for-2-6-31-51.patch
-ApplyPatch redhat-fixing-the-kernel-versions-on-the-SPEC-changelog.patch
-ApplyPatch redhat-Fix-version-passed-to-update_changelog-sh.patch
-ApplyPatch mm-Limit-32-bit-x86-systems-to-16GB-and-prevent-panic-on-boot-when-system-has-more-than-30GB.patch
-ApplyPatch ppc64-Fix-kcrctab_-sections-to-undo-undesireable-relocations-that-break-kdump.patch
-ApplyPatch net-export-device-speed-and-duplex-via-sysfs.patch
-ApplyPatch scsi-devinfo-update-for-Hitachi-entries.patch
-ApplyPatch x86-AMD-Northbridge-Verify-NB-s-node-is-online.patch
-ApplyPatch redhat-tagging-2-6-32-0-52-el6.patch
-ApplyPatch redhat-updating-lastcommit-for-2-6-32-0-52.patch
-ApplyPatch redhat-fix-STAMP-version-on-rh-release-commit-phase.patch
-ApplyPatch redhat-enable-debug-builds-also-on-s390x-and-ppc64.patch
-ApplyPatch s390x-fix-build-failure-with-CONFIG_FTRACE_SYSCALLS.patch
-ApplyPatch procfs-add-ability-to-modify-proc-file-limits-from-outside-a-processes-own-context.patch
-ApplyPatch modsign-Multiprecision-maths-library.patch
-ApplyPatch modsign-Add-indications-of-module-ELF-types.patch
-ApplyPatch modsign-Module-ELF-verifier.patch
-ApplyPatch modsign-Module-signature-checker-and-key-manager.patch
-ApplyPatch modsign-Apply-signature-checking-to-modules-on-module-load.patch
-ApplyPatch modsign-Don-t-include-note-gnu-build-id-in-the-digest.patch
-ApplyPatch modsign-Enable-module-signing-in-the-RHEL-RPM.patch
-ApplyPatch net-Add-acession-counts-to-all-datagram-protocols.patch
-ApplyPatch redhat-tagging-2-6-32-0-53-el6.patch
-ApplyPatch redhat-updating-lastcommit-for-2-6-32-0-53.patch
-ApplyPatch redhat-fixing-wrong-bug-number-536759-536769.patch
-ApplyPatch redhat-adding-top-makefile-to-enable-rh-targets.patch
-ApplyPatch redhat-add-temporary-framepointer-variant.patch
-ApplyPatch redhat-add-rh-key-target-to-Makefile.patch
-ApplyPatch infiniband-Rewrite-SG-handling-for-RDMA-logic.patch
-ApplyPatch x86-panic-if-AMD-cpu_khz-is-wrong.patch
-ApplyPatch x86-Enable-CONFIG_SPARSE_IRQ.patch
-ApplyPatch edac-amd64_edac-disabling-temporarily.patch
-ApplyPatch redhat-tagging-2-6-32-0-54-el6.patch
-ApplyPatch redhat-updating-lastcommit-for-2-6-32-0-54.patch
-ApplyPatch redhat-create-patches-sh-use-first-parent-to-use-the-right-branch-history.patch
-ApplyPatch redhat-Rebasing-to-kernel-2-6-32.patch
-ApplyPatch redhat-updating-lastcommit-for-2-6-32-1.patch
-ApplyPatch redhat-introduce-rh-kernel-debug-target.patch
-ApplyPatch redhat-update-build-targets-in-Makefile.patch
-ApplyPatch redhat-include-missing-System-map-file-for-debug-only-builds.patch
-ApplyPatch Fedora-updating-linux-2-6-execshield-patch-2-6-32-8-fc13-reference.patch
-ApplyPatch Fedora-updating-patch-linux-2-6-nfsd4-proots-patch-2-6-32-8-fc13-reference.patch
-ApplyPatch Fedora-intel-iommu-backport.patch
-ApplyPatch Fedora-ath9k-backports.patch
-ApplyPatch Fedora-KVM-allow-userspace-to-adjust-kvmclock-offset.patch
-ApplyPatch Fedora-drm-radeon-fixes.patch
-ApplyPatch Fedora-drm-radeon-dp-support.patch
-ApplyPatch Fedora-drm-nouveau-fixes.patch
-ApplyPatch Fedora-drm-i915-Fix-sync-to-vblank-when-VGA-output-is-turned-off.patch
-ApplyPatch Fedora-agp-clear-GTT-on-intel.patch
-ApplyPatch Fedora-ext4-Fix-insuficient-checks-in-EXT4_IOC_MOVE_EXT.patch
-ApplyPatch Fedora-perf-Don-t-free-perf_mmap_data-until-work-has-been-done.patch
-ApplyPatch redhat-updating-config-files-based-on-current-requests-12-10.patch
-ApplyPatch redhat-Config-updates-12-15.patch
-ApplyPatch block-revert-cfq-iosched-limit-coop-preemption.patch
-ApplyPatch block-CFQ-is-more-than-a-desktop-scheduler.patch
-ApplyPatch block-cfq-calculate-the-seek_mean-per-cfq_queue-not-per-cfq_io_context.patch
-ApplyPatch block-cfq-merge-cooperating-cfq_queues.patch
-ApplyPatch block-cfq-change-the-meaning-of-the-cfqq_coop-flag.patch
-ApplyPatch block-cfq-break-apart-merged-cfqqs-if-they-stop-cooperating.patch
-ApplyPatch block-cfq-iosched-improve-hw_tag-detection.patch
-ApplyPatch block-cfq-iosched-adapt-slice-to-number-of-processes-doing-I-O.patch
-ApplyPatch block-cfq-iosched-preparation-to-handle-multiple-service-trees.patch
-ApplyPatch block-cfq-iosched-reimplement-priorities-using-different-service-trees.patch
-ApplyPatch block-cfq-iosched-enable-idling-for-last-queue-on-priority-class.patch
-ApplyPatch block-cfq-iosched-fairness-for-sync-no-idle-queues.patch
-ApplyPatch block-cfq-iosched-fix-style-issue-in-cfq_get_avg_queues.patch
-ApplyPatch block-blkdev-flush-disk-cache-on-fsync.patch
-ApplyPatch block-cfq-iosched-simplify-prio-unboost-code.patch
-ApplyPatch block-cfq-iosched-fix-next_rq-computation.patch
-ApplyPatch block-Expose-discard-granularity.patch
-ApplyPatch block-partitions-use-sector-size-for-EFI-GPT.patch
-ApplyPatch block-partitions-read-whole-sector-with-EFI-GPT-header.patch
-ApplyPatch block-cfq-Make-use-of-service-count-to-estimate-the-rb_key-offset.patch
-ApplyPatch block-cfq-iosched-cleanup-unreachable-code.patch
-ApplyPatch block-cfq-iosched-fix-ncq-detection-code.patch
-ApplyPatch block-cfq-iosched-fix-no-idle-preemption-logic.patch
-ApplyPatch block-cfq-iosched-idling-on-deep-seeky-sync-queues.patch
-ApplyPatch block-cfq-iosched-fix-corner-cases-in-idling-logic.patch
-ApplyPatch block-Revert-cfq-Make-use-of-service-count-to-estimate-the-rb_key-offset.patch
-ApplyPatch block-Allow-devices-to-indicate-whether-discarded-blocks-are-zeroed.patch
-ApplyPatch block-cfq-iosched-no-dispatch-limit-for-single-queue.patch
-ApplyPatch block-blkio-Set-must_dispatch-only-if-we-decided-to-not-dispatch-the-request.patch
-ApplyPatch block-blkio-Introduce-the-notion-of-cfq-groups.patch
-ApplyPatch block-blkio-Implement-macro-to-traverse-each-service-tree-in-group.patch
-ApplyPatch block-blkio-Keep-queue-on-service-tree-until-we-expire-it.patch
-ApplyPatch block-blkio-Introduce-the-root-service-tree-for-cfq-groups.patch
-ApplyPatch block-blkio-Introduce-blkio-controller-cgroup-interface.patch
-ApplyPatch block-blkio-Introduce-per-cfq-group-weights-and-vdisktime-calculations.patch
-ApplyPatch block-blkio-Implement-per-cfq-group-latency-target-and-busy-queue-avg.patch
-ApplyPatch block-blkio-Group-time-used-accounting-and-workload-context-save-restore.patch
-ApplyPatch block-blkio-Dynamic-cfq-group-creation-based-on-cgroup-tasks-belongs-to.patch
-ApplyPatch block-blkio-Take-care-of-cgroup-deletion-and-cfq-group-reference-counting.patch
-ApplyPatch block-blkio-Some-debugging-aids-for-CFQ.patch
-ApplyPatch block-blkio-Export-disk-time-and-sectors-used-by-a-group-to-user-space.patch
-ApplyPatch block-blkio-Provide-some-isolation-between-groups.patch
-ApplyPatch block-blkio-Drop-the-reference-to-queue-once-the-task-changes-cgroup.patch
-ApplyPatch block-blkio-Propagate-cgroup-weight-updation-to-cfq-groups.patch
-ApplyPatch block-blkio-Wait-for-cfq-queue-to-get-backlogged-if-group-is-empty.patch
-ApplyPatch block-blkio-Determine-async-workload-length-based-on-total-number-of-queues.patch
-ApplyPatch block-blkio-Implement-group_isolation-tunable.patch
-ApplyPatch block-blkio-Wait-on-sync-noidle-queue-even-if-rq_noidle-1.patch
-ApplyPatch block-blkio-Documentation.patch
-ApplyPatch block-cfq-iosched-fix-compile-problem-with-CONFIG_CGROUP.patch
-ApplyPatch block-cfq-iosched-move-IO-controller-declerations-to-a-header-file.patch
-ApplyPatch block-io-controller-quick-fix-for-blk-cgroup-and-modular-CFQ.patch
-ApplyPatch block-cfq-iosched-make-nonrot-check-logic-consistent.patch
-ApplyPatch block-blkio-Export-some-symbols-from-blkio-as-its-user-CFQ-can-be-a-module.patch
-ApplyPatch block-blkio-Implement-dynamic-io-controlling-policy-registration.patch
-ApplyPatch block-blkio-Allow-CFQ-group-IO-scheduling-even-when-CFQ-is-a-module.patch
-ApplyPatch block-cfq-iosched-use-call_rcu-instead-of-doing-grace-period-stall-on-queue-exit.patch
-ApplyPatch block-include-linux-err-h-to-use-ERR_PTR.patch
-ApplyPatch block-cfq-iosched-Do-not-access-cfqq-after-freeing-it.patch
-ApplyPatch block-dio-fix-performance-regression.patch
-ApplyPatch block-Add-support-for-the-ATA-TRIM-command-in-libata.patch
-ApplyPatch scsi-Add-missing-command-definitions.patch
-ApplyPatch scsi-scsi_debug-Thin-provisioning-support.patch
-ApplyPatch scsi-sd-WRITE-SAME-16-UNMAP-support.patch
-ApplyPatch scsi-Correctly-handle-thin-provisioning-write-error.patch
-ApplyPatch libata-Report-zeroed-read-after-Trim-and-max-discard-size.patch
-ApplyPatch libata-Clarify-ata_set_lba_range_entries-function.patch
-ApplyPatch block-config-enable-CONFIG_BLK_CGROUP.patch
-ApplyPatch block-config-enable-CONFIG_BLK_DEV_INTEGRITY.patch
-ApplyPatch redhat-tagging-2-6-32-2-el6.patch
-ApplyPatch redhat-updating-lastcommit-for-2-6-32-2.patch
-ApplyPatch redhat-force-to-run-rh-key-target-when-compiling-the-kernel-locally-without-RPM.patch
-ApplyPatch redhat-run-rngd-on-rh-key-to-speed-up-key-generation.patch
-ApplyPatch redhat-make-the-documentation-build-j1.patch
-ApplyPatch redhat-remove-unused-config-file-config-powerpc64-generic-rhel.patch
-ApplyPatch redhat-fix-problem-when-using-other-rh-targets.patch
-ApplyPatch redhat-reverting-makefile-magic.patch
-ApplyPatch redhat-remove-gcc-bug-workaround.patch
-ApplyPatch redhat-run-rh-key-when-the-GPG-keys-aren-t-present.patch
-ApplyPatch nfs-convert-proto-option-to-use-netids-rather-than-a-protoname.patch
-ApplyPatch scsi-fix-dma-handling-when-using-virtual-hosts.patch
-ApplyPatch dm-core-and-mpath-changes-from-2-6-33.patch
-ApplyPatch dm-raid1-changes-from-2-6-33.patch
-ApplyPatch dm-crypt-changes-from-2-6-33.patch
-ApplyPatch dm-snapshot-changes-from-2-6-33.patch
-ApplyPatch dm-snapshot-merge-support-from-2-6-33.patch
-ApplyPatch redhat-add-vhost-to-config-generic-rhel.patch
-ApplyPatch virt-tun-export-underlying-socket.patch
-ApplyPatch virt-mm-export-use_mm-unuse_mm-to-modules.patch
-ApplyPatch virt-vhost_net-a-kernel-level-virtio-server.patch
-ApplyPatch virt-vhost-add-missing-architectures.patch
-ApplyPatch s390-kernel-clear-high-order-bits-after-switching-to-64-bit-mode.patch
-ApplyPatch s390-zcrypt-Do-not-simultaneously-schedule-hrtimer.patch
-ApplyPatch s390-dasd-support-DIAG-access-for-read-only-devices.patch
-ApplyPatch s390-kernel-fix-dump-indicator.patch
-ApplyPatch s390-kernel-performance-counter-fix-and-page-fault-optimization.patch
-ApplyPatch s390-zcrypt-initialize-ap_messages-for-cex3-exploitation.patch
-ApplyPatch s390-zcrypt-special-command-support-for-cex3-exploitation.patch
-ApplyPatch s390-zcrypt-add-support-for-cex3-device-types.patch
-ApplyPatch s390-zcrypt-use-definitions-for-cex3.patch
-ApplyPatch s390-zcrypt-adjust-speed-rating-between-cex2-and-pcixcc.patch
-ApplyPatch s390-zcrypt-adjust-speed-rating-of-cex3-adapters.patch
-ApplyPatch s390-OSA-QDIO-data-connection-isolation.patch
-ApplyPatch redhat-Build-in-standard-PCI-hotplug-support.patch
-ApplyPatch pci-pciehp-Provide-an-option-to-disable-native-PCIe-hotplug.patch
-ApplyPatch modsign-Don-t-check-e_entry-in-ELF-header.patch
-ApplyPatch redhat-fixing-lastcommit-contents-for-2-6-32-2-el6.patch
-ApplyPatch redhat-tagging-2-6-32-3-el6.patch
-ApplyPatch redhat-updating-lastcommit-for-2-6-32-3.patch
-ApplyPatch misc-Revert-utrace-introduce-utrace-implementation.patch
-ApplyPatch ptrace-cleanup-ptrace_init_task-ptrace_link-path.patch
-ApplyPatch ptrace-copy_process-should-disable-stepping.patch
-ApplyPatch ptrace-introduce-user_single_step_siginfo-helper.patch
-ApplyPatch ptrace-powerpc-implement-user_single_step_siginfo.patch
-ApplyPatch ptrace-change-tracehook_report_syscall_exit-to-handle-stepping.patch
-ApplyPatch ptrace-x86-implement-user_single_step_siginfo.patch
-ApplyPatch ptrace-x86-change-syscall_trace_leave-to-rely-on-tracehook-when-stepping.patch
-ApplyPatch signals-check-group_stop_count-after-tracehook_get_signal.patch
-ApplyPatch tracehooks-kill-some-PT_PTRACED-checks.patch
-ApplyPatch tracehooks-check-PT_PTRACED-before-reporting-the-single-step.patch
-ApplyPatch ptrace_signal-check-PT_PTRACED-before-reporting-a-signal.patch
-ApplyPatch ptrace-export-__ptrace_detach-and-do_notify_parent_cldstop.patch
-ApplyPatch ptrace-reorder-the-code-in-kernel-ptrace-c.patch
-ApplyPatch utrace-implement-utrace-ptrace.patch
-ApplyPatch utrace-utrace-core.patch
-ApplyPatch sound-ALSA-HDA-driver-update-2009-12-15.patch
-ApplyPatch s390-dasd-enable-prefix-independent-of-pav-support.patch
-ApplyPatch s390-dasd-remove-strings-from-s390dbf.patch
-ApplyPatch s390-dasd-let-device-initialization-wait-for-LCU-setup.patch
-ApplyPatch redhat-kernel-enable-hibernation-support-on-s390x.patch
-ApplyPatch s390-iucv-add-work_queue-cleanup-for-suspend.patch
-ApplyPatch s390-cmm-free-pages-on-hibernate.patch
-ApplyPatch s390-ctcm-suspend-has-to-wait-for-outstanding-I-O.patch
-ApplyPatch s390-zfcp-Don-t-fail-SCSI-commands-when-transitioning-to-blocked-fc_rport.patch
-ApplyPatch s390-zfcp-Assign-scheduled-work-to-driver-queue.patch
-ApplyPatch s390-zfcp-fix-ELS-ADISC-handling-to-prevent-QDIO-errors.patch
-ApplyPatch s390-zfcp-improve-FSF-error-reporting.patch
-ApplyPatch scsi-scsi_transport_fc-Introduce-helper-function-for-blocking-scsi_eh.patch
-ApplyPatch s390-zfcp-Block-SCSI-EH-thread-for-rport-state-BLOCKED.patch
-ApplyPatch uv-x86-SGI-UV-Fix-BAU-initialization.patch
-ApplyPatch uv-x86-function-to-translate-from-gpa-socket_paddr.patch
-ApplyPatch uv-x86-introduce-uv_gpa_is_mmr.patch
-ApplyPatch uv-x86-RTC-Fix-early-expiry-handling.patch
-ApplyPatch uv-x86-RTC-Add-clocksource-only-boot-option.patch
-ApplyPatch uv-x86-RTC-Clean-up-error-handling.patch
-ApplyPatch uv-gru-function-to-generate-chipset-IPI-values.patch
-ApplyPatch uv-x86-SGI-Map-low-MMR-ranges.patch
-ApplyPatch xen-wait-up-to-5-minutes-for-device-connetion-and-fix-fallout.patch
-ApplyPatch xen-support-MAXSMP.patch
-ApplyPatch mm-move-inc_zone_page_state-NR_ISOLATED-to-just-isolated-place.patch
-ApplyPatch mm-swap_info-private-to-swapfile-c.patch
-ApplyPatch mm-swap_info-change-to-array-of-pointers.patch
-ApplyPatch mm-swap_info-include-first_swap_extent.patch
-ApplyPatch mm-swap_info-miscellaneous-minor-cleanups.patch
-ApplyPatch mm-swap_info-SWAP_HAS_CACHE-cleanups.patch
-ApplyPatch mm-swap_info-swap_map-of-chars-not-shorts.patch
-ApplyPatch mm-swap_info-swap-count-continuations.patch
-ApplyPatch mm-swap_info-note-SWAP_MAP_SHMEM.patch
-ApplyPatch mm-define-PAGE_MAPPING_FLAGS.patch
-ApplyPatch mm-mlocking-in-try_to_unmap_one.patch
-ApplyPatch mm-CONFIG_MMU-for-PG_mlocked.patch
-ApplyPatch mm-pass-address-down-to-rmap-ones.patch
-ApplyPatch mm-vmscan-have-kswapd-sleep-for-a-short-interval-and-double-check-it-should-be-asleep.patch
-ApplyPatch mm-vmscan-stop-kswapd-waiting-on-congestion-when-the-min-watermark-is-not-being-met.patch
-ApplyPatch mm-vmscan-separate-sc-swap_cluster_max-and-sc-nr_max_reclaim.patch
-ApplyPatch mm-vmscan-kill-hibernation-specific-reclaim-logic-and-unify-it.patch
-ApplyPatch mm-vmscan-zone_reclaim-dont-use-insane-swap_cluster_max.patch
-ApplyPatch mm-vmscan-kill-sc-swap_cluster_max.patch
-ApplyPatch mm-vmscan-make-consistent-of-reclaim-bale-out-between-do_try_to_free_page-and-shrink_zone.patch
-ApplyPatch mm-vmscan-do-not-evict-inactive-pages-when-skipping-an-active-list-scan.patch
-ApplyPatch mm-stop-ptlock-enlarging-struct-page.patch
-ApplyPatch ksm-three-remove_rmap_item_from_tree-cleanups.patch
-ApplyPatch ksm-remove-redundancies-when-merging-page.patch
-ApplyPatch ksm-cleanup-some-function-arguments.patch
-ApplyPatch ksm-singly-linked-rmap_list.patch
-ApplyPatch ksm-separate-stable_node.patch
-ApplyPatch ksm-stable_node-point-to-page-and-back.patch
-ApplyPatch ksm-fix-mlockfreed-to-munlocked.patch
-ApplyPatch ksm-let-shared-pages-be-swappable.patch
-ApplyPatch ksm-hold-anon_vma-in-rmap_item.patch
-ApplyPatch ksm-take-keyhole-reference-to-page.patch
-ApplyPatch ksm-share-anon-page-without-allocating.patch
-ApplyPatch ksm-mem-cgroup-charge-swapin-copy.patch
-ApplyPatch ksm-rmap_walk-to-remove_migation_ptes.patch
-ApplyPatch ksm-memory-hotremove-migration-only.patch
-ApplyPatch ksm-remove-unswappable-max_kernel_pages.patch
-ApplyPatch ksm-fix-ksm-h-breakage-of-nommu-build.patch
-ApplyPatch mm-Add-mm-tracepoint-definitions-to-kmem-h.patch
-ApplyPatch mm-Add-anonynmous-page-mm-tracepoints.patch
-ApplyPatch mm-Add-file-page-mm-tracepoints.patch
-ApplyPatch mm-Add-page-reclaim-mm-tracepoints.patch
-ApplyPatch mm-Add-file-page-writeback-mm-tracepoints.patch
-ApplyPatch scsi-hpsa-new-driver.patch
-ApplyPatch scsi-cciss-remove-pci-ids.patch
-ApplyPatch quota-Move-definition-of-QFMT_OCFS2-to-linux-quota-h.patch
-ApplyPatch quota-Implement-quota-format-with-64-bit-space-and-inode-limits.patch
-ApplyPatch quota-ext3-Support-for-vfsv1-quota-format.patch
-ApplyPatch quota-ext4-Support-for-64-bit-quota-format.patch
-ApplyPatch kvm-core-x86-Add-user-return-notifiers.patch
-ApplyPatch kvm-VMX-Move-MSR_KERNEL_GS_BASE-out-of-the-vmx-autoload-msr-area.patch
-ApplyPatch kvm-x86-shared-msr-infrastructure.patch
-ApplyPatch kvm-VMX-Use-shared-msr-infrastructure.patch
-ApplyPatch redhat-excluding-Reverts-from-changelog-too.patch
-ApplyPatch redhat-tagging-2-6-32-4-el6.patch
-ApplyPatch redhat-updating-lastcommit-for-2-6-32-4.patch
-ApplyPatch redhat-do-not-export-redhat-directory-contents.patch
-ApplyPatch x86-Remove-the-CPU-cache-size-printk-s.patch
-ApplyPatch x86-Remove-CPU-cache-size-output-for-non-Intel-too.patch
-ApplyPatch x86-cpu-mv-display_cacheinfo-cpu_detect_cache_sizes.patch
-ApplyPatch x86-Limit-the-number-of-processor-bootup-messages.patch
-ApplyPatch init-Limit-the-number-of-per-cpu-calibration-bootup-messages.patch
-ApplyPatch sched-Limit-the-number-of-scheduler-debug-messages.patch
-ApplyPatch x86-Limit-number-of-per-cpu-TSC-sync-messages.patch
-ApplyPatch x86-Remove-enabling-x2apic-message-for-every-CPU.patch
-ApplyPatch x86-ucode-amd-Load-ucode-patches-once-and-not-separately-of-each-CPU.patch
-ApplyPatch block-cfq-iosched-reduce-write-depth-only-if-sync-was-delayed.patch
-ApplyPatch block-cfq-Optimization-for-close-cooperating-queue-searching.patch
-ApplyPatch block-cfq-iosched-Get-rid-of-cfqq-wait_busy_done-flag.patch
-ApplyPatch block-cfq-iosched-Take-care-of-corner-cases-of-group-losing-share-due-to-deletion.patch
-ApplyPatch block-cfq-iosched-commenting-non-obvious-initialization.patch
-ApplyPatch block-cfq-Remove-wait_request-flag-when-idle-time-is-being-deleted.patch
-ApplyPatch block-Fix-a-CFQ-crash-in-for-2-6-33-branch-of-block-tree.patch
-ApplyPatch block-cfq-set-workload-as-expired-if-it-doesn-t-have-any-slice-left.patch
-ApplyPatch block-cfq-iosched-Remove-the-check-for-same-cfq-group-from-allow_merge.patch
-ApplyPatch block-cfq-iosched-Get-rid-of-nr_groups.patch
-ApplyPatch block-cfq-iosched-Remove-prio_change-logic-for-workload-selection.patch
-ApplyPatch netdrv-ixgbe-add-support-for-82599-KR-and-update-to-latest-upstream.patch
-ApplyPatch netdrv-bnx2x-update-to-1-52-1-5.patch
-ApplyPatch netdrv-update-tg3-to-version-3-105.patch
-ApplyPatch scsi-scsi_dh-Change-the-scsidh_activate-interface-to-be-asynchronous.patch
-ApplyPatch scsi-scsi_dh-Make-rdac-hardware-handler-s-activate-async.patch
-ApplyPatch scsi-scsi_dh-Make-hp-hardware-handler-s-activate-async.patch
-ApplyPatch scsi-scsi_dh-Make-alua-hardware-handler-s-activate-async.patch
-ApplyPatch block-Fix-topology-stacking-for-data-and-discard-alignment.patch
-ApplyPatch dlm-always-use-GFP_NOFS.patch
-ApplyPatch redhat-Some-storage-related-kernel-config-parameter-changes.patch
-ApplyPatch scsi-eliminate-double-free.patch
-ApplyPatch scsi-make-driver-PCI-legacy-I-O-port-free.patch
-ApplyPatch gfs2-Fix-potential-race-in-glock-code.patch
-ApplyPatch netdrv-cnic-fixes-for-RHEL6.patch
-ApplyPatch netdrv-bnx2i-update-to-2-1-0.patch
-ApplyPatch mm-hwpoison-backport-the-latest-patches-from-linux-2-6-33.patch
-ApplyPatch fs-ext4-wait-for-log-to-commit-when-unmounting.patch
-ApplyPatch cifs-NULL-out-tcon-pSesInfo-and-srvTcp-pointers-when-chasing-DFS-referrals.patch
-ApplyPatch fusion-remove-unnecessary-printk.patch
-ApplyPatch fusion-fix-for-incorrect-data-underrun.patch
-ApplyPatch fusion-bump-version-to-3-04-13.patch
-ApplyPatch ext4-make-trim-discard-optional-and-off-by-default.patch
-ApplyPatch fat-make-discard-a-mount-option.patch
-ApplyPatch fs-fs-writeback-Add-helper-function-to-start-writeback-if-idle.patch
-ApplyPatch fs-ext4-flush-delalloc-blocks-when-space-is-low.patch
-ApplyPatch scsi-scsi_dh_rdac-add-two-IBM-devices-to-rdac_dev_list.patch
-ApplyPatch vfs-force-reval-of-target-when-following-LAST_BIND-symlinks.patch
-ApplyPatch input-Add-support-for-adding-i8042-filters.patch
-ApplyPatch input-dell-laptop-Update-rfkill-state-on-switch-change.patch
-ApplyPatch sunrpc-Deprecate-support-for-site-local-addresses.patch
-ApplyPatch sunrpc-Don-t-display-zero-scope-IDs.patch
-ApplyPatch s390-cio-double-free-under-memory-pressure.patch
-ApplyPatch s390-cio-device-recovery-stalls-after-multiple-hardware-events.patch
-ApplyPatch s390-cio-device-recovery-fails-after-concurrent-hardware-changes.patch
-ApplyPatch s390-cio-setting-a-device-online-or-offline-fails-for-unknown-reasons.patch
-ApplyPatch s390-cio-incorrect-device-state-after-device-recognition-and-recovery.patch
-ApplyPatch s390-cio-kernel-panic-after-unexpected-interrupt.patch
-ApplyPatch s390-cio-initialization-of-I-O-devices-fails.patch
-ApplyPatch s390-cio-not-operational-devices-cannot-be-deactivated.patch
-ApplyPatch s390-cio-erratic-DASD-I-O-behavior.patch
-ApplyPatch s390-cio-DASD-cannot-be-set-online.patch
-ApplyPatch s390-cio-DASD-steal-lock-task-hangs.patch
-ApplyPatch s390-cio-memory-leaks-when-checking-unusable-devices.patch
-ApplyPatch s390-cio-deactivated-devices-can-cause-use-after-free-panic.patch
-ApplyPatch nfs-NFS-update-to-2-6-33-part-1.patch
-ApplyPatch nfs-NFS-update-to-2-6-33-part-2.patch
-ApplyPatch nfs-NFS-update-to-2-6-33-part-3.patch
-ApplyPatch nfs-fix-insecure-export-option.patch
-ApplyPatch redhat-enable-NFS_V4_1.patch
-ApplyPatch x86-Compile-mce-inject-module.patch
-ApplyPatch modsign-Don-t-attempt-to-sign-a-module-if-there-are-no-key-files.patch
-ApplyPatch scsi-cciss-hpsa-reassign-controllers.patch
-ApplyPatch scsi-cciss-fix-spinlock-use.patch
-ApplyPatch redhat-disabling-temporaly-DEVTMPFS.patch
-ApplyPatch redhat-don-t-use-PACKAGE_VERSION-and-PACKAGE_RELEASE.patch
-ApplyPatch redhat-tagging-2-6-32-5-el6.patch
-ApplyPatch redhat-updating-lastcommit-for-2-6-32-5.patch
-ApplyPatch redhat-add-symbol-to-look-on-while-building-modules-block.patch
-ApplyPatch stable-signal-Fix-alternate-signal-stack-check.patch
-ApplyPatch stable-SCSI-osd_protocol-h-Add-missing-include.patch
-ApplyPatch stable-SCSI-megaraid_sas-fix-64-bit-sense-pointer-truncation.patch
-ApplyPatch stable-ext4-fix-potential-buffer-head-leak-when-add_dirent_to_buf-returns-ENOSPC.patch
-ApplyPatch stable-ext4-avoid-divide-by-zero-when-trying-to-mount-a-corrupted-file-system.patch
-ApplyPatch stable-ext4-fix-the-returned-block-count-if-EXT4_IOC_MOVE_EXT-fails.patch
-ApplyPatch stable-ext4-fix-lock-order-problem-in-ext4_move_extents.patch
-ApplyPatch stable-ext4-fix-possible-recursive-locking-warning-in-EXT4_IOC_MOVE_EXT.patch
-ApplyPatch stable-ext4-plug-a-buffer_head-leak-in-an-error-path-of-ext4_iget.patch
-ApplyPatch stable-ext4-make-sure-directory-and-symlink-blocks-are-revoked.patch
-ApplyPatch stable-ext4-fix-i_flags-access-in-ext4_da_writepages_trans_blocks.patch
-ApplyPatch stable-ext4-journal-all-modifications-in-ext4_xattr_set_handle.patch
-ApplyPatch stable-ext4-don-t-update-the-superblock-in-ext4_statfs.patch
-ApplyPatch stable-ext4-fix-uninit-block-bitmap-initialization-when-s_meta_first_bg-is-non-zero.patch
-ApplyPatch stable-ext4-fix-block-validity-checks-so-they-work-correctly-with-meta_bg.patch
-ApplyPatch stable-ext4-avoid-issuing-unnecessary-barriers.patch
-ApplyPatch stable-ext4-fix-error-handling-in-ext4_ind_get_blocks.patch
-ApplyPatch stable-ext4-make-norecovery-an-alias-for-noload.patch
-ApplyPatch stable-ext4-Fix-double-free-of-blocks-with-EXT4_IOC_MOVE_EXT.patch
-ApplyPatch stable-ext4-initialize-moved_len-before-calling-ext4_move_extents.patch
-ApplyPatch stable-ext4-move_extent_per_page-cleanup.patch
-ApplyPatch stable-jbd2-Add-ENOMEM-checking-in-and-for-jbd2_journal_write_metadata_buffer.patch
-ApplyPatch stable-ext4-Return-the-PTR_ERR-of-the-correct-pointer-in-setup_new_group_blocks.patch
-ApplyPatch stable-ext4-Avoid-data-filesystem-corruption-when-write-fails-to-copy-data.patch
-ApplyPatch stable-ext4-remove-blocks-from-inode-prealloc-list-on-failure.patch
-ApplyPatch stable-ext4-ext4_get_reserved_space-must-return-bytes-instead-of-blocks.patch
-ApplyPatch stable-ext4-quota-macros-cleanup.patch
-ApplyPatch stable-ext4-fix-incorrect-block-reservation-on-quota-transfer.patch
-ApplyPatch stable-ext4-Wait-for-proper-transaction-commit-on-fsync.patch
-ApplyPatch stable-ext4-Fix-potential-fiemap-deadlock-mmap_sem-vs-i_data_sem.patch
-ApplyPatch stable-USB-usb-storage-fix-bug-in-fill_inquiry.patch
-ApplyPatch stable-USB-option-add-pid-for-ZTE.patch
-ApplyPatch stable-firewire-ohci-handle-receive-packets-with-a-data-length-of-zero.patch
-ApplyPatch stable-rcu-Prepare-for-synchronization-fixes-clean-up-for-non-NO_HZ-handling-of-completed-counter.patch
-ApplyPatch stable-rcu-Fix-synchronization-for-rcu_process_gp_end-uses-of-completed-counter.patch
-ApplyPatch stable-rcu-Fix-note_new_gpnum-uses-of-gpnum.patch
-ApplyPatch stable-rcu-Remove-inline-from-forward-referenced-functions.patch
-ApplyPatch stable-perf_event-Fix-invalid-type-in-ioctl-definition.patch
-ApplyPatch stable-perf_event-Initialize-data-period-in-perf_swevent_hrtimer.patch
-ApplyPatch stable-PM-Runtime-Fix-lockdep-warning-in-__pm_runtime_set_status.patch
-ApplyPatch stable-sched-Check-for-an-idle-shared-cache-in-select_task_rq_fair.patch
-ApplyPatch stable-sched-Fix-affinity-logic-in-select_task_rq_fair.patch
-ApplyPatch stable-sched-Rate-limit-newidle.patch
-ApplyPatch stable-sched-Fix-and-clean-up-rate-limit-newidle-code.patch
-ApplyPatch stable-x86-amd-iommu-attach-devices-to-pre-allocated-domains-early.patch
-ApplyPatch stable-x86-amd-iommu-un__init-iommu_setup_msi.patch
-ApplyPatch stable-x86-Calgary-IOMMU-quirk-Find-nearest-matching-Calgary-while-walking-up-the-PCI-tree.patch
-ApplyPatch stable-x86-Fix-iommu-nodac-parameter-handling.patch
-ApplyPatch stable-x86-GART-pci-gart_64-c-Use-correct-length-in-strncmp.patch
-ApplyPatch stable-x86-ASUS-P4S800-reboot-bios-quirk.patch
-ApplyPatch stable-x86-apic-Enable-lapic-nmi-watchdog-on-AMD-Family-11h.patch
-ApplyPatch stable-ssb-Fix-range-check-in-sprom-write.patch
-ApplyPatch stable-ath5k-allow-setting-txpower-to-0.patch
-ApplyPatch stable-ath5k-enable-EEPROM-checksum-check.patch
-ApplyPatch stable-hrtimer-Fix-proc-timer_list-regression.patch
-ApplyPatch stable-ALSA-hrtimer-Fix-lock-up.patch
-ApplyPatch stable-KVM-x86-emulator-limit-instructions-to-15-bytes.patch
-ApplyPatch stable-KVM-s390-Fix-prefix-register-checking-in-arch-s390-kvm-sigp-c.patch
-ApplyPatch stable-KVM-s390-Make-psw-available-on-all-exits-not-just-a-subset.patch
-ApplyPatch stable-KVM-fix-irq_source_id-size-verification.patch
-ApplyPatch stable-KVM-x86-include-pvclock-MSRs-in-msrs_to_save.patch
-ApplyPatch stable-x86-Prevent-GCC-4-4-x-pentium-mmx-et-al-function-prologue-wreckage.patch
-ApplyPatch stable-x86-Use-maccumulate-outgoing-args-for-sane-mcount-prologues.patch
-ApplyPatch stable-x86-mce-don-t-restart-timer-if-disabled.patch
-ApplyPatch stable-x86-mce-Set-up-timer-unconditionally.patch
-ApplyPatch stable-x86-Fix-duplicated-UV-BAU-interrupt-vector.patch
-ApplyPatch stable-x86-Add-new-Intel-CPU-cache-size-descriptors.patch
-ApplyPatch stable-x86-Fix-typo-in-Intel-CPU-cache-size-descriptor.patch
-ApplyPatch stable-pata_hpt-37x-3x2n-fix-timing-register-masks-take-2.patch
-ApplyPatch stable-V4L-DVB-Fix-test-in-copy_reg_bits.patch
-ApplyPatch stable-bsdacct-fix-uid-gid-misreporting.patch
-ApplyPatch stable-UBI-flush-wl-before-clearing-update-marker.patch
-ApplyPatch stable-jbd2-don-t-wipe-the-journal-on-a-failed-journal-checksum.patch
-ApplyPatch stable-USB-xhci-Add-correct-email-and-files-to-MAINTAINERS-entry.patch
-ApplyPatch stable-USB-musb_gadget_ep0-fix-unhandled-endpoint-0-IRQs-again.patch
-ApplyPatch stable-USB-option-c-add-support-for-D-Link-DWM-162-U5.patch
-ApplyPatch stable-USB-usbtmc-repeat-usb_bulk_msg-until-whole-message-is-transfered.patch
-ApplyPatch stable-USB-usb-storage-add-BAD_SENSE-flag.patch
-ApplyPatch stable-USB-Close-usb_find_interface-race-v3.patch
-ApplyPatch stable-pxa-em-x270-fix-usb-hub-power-up-reset-sequence.patch
-ApplyPatch stable-hfs-fix-a-potential-buffer-overflow.patch
-ApplyPatch stable-md-bitmap-protect-against-bitmap-removal-while-being-updated.patch
-ApplyPatch stable-futex-Take-mmap_sem-for-get_user_pages-in-fault_in_user_writeable.patch
-ApplyPatch stable-devpts_get_tty-should-validate-inode.patch
-ApplyPatch stable-debugfs-fix-create-mutex-racy-fops-and-private-data.patch
-ApplyPatch stable-Driver-core-fix-race-in-dev_driver_string.patch
-ApplyPatch stable-Serial-Do-not-read-IIR-in-serial8250_start_tx-when-UART_BUG_TXEN.patch
-ApplyPatch stable-mac80211-Fix-bug-in-computing-crc-over-dynamic-IEs-in-beacon.patch
-ApplyPatch stable-mac80211-Fixed-bug-in-mesh-portal-paths.patch
-ApplyPatch stable-mac80211-Revert-Use-correct-sign-for-mesh-active-path-refresh.patch
-ApplyPatch stable-mac80211-fix-scan-abort-sanity-checks.patch
-ApplyPatch stable-wireless-correctly-report-signal-value-for-IEEE80211_HW_SIGNAL_UNSPEC.patch
-ApplyPatch stable-rtl8187-Fix-wrong-rfkill-switch-mask-for-some-models.patch
-ApplyPatch stable-x86-Fix-bogus-warning-in-apic_noop-apic_write.patch
-ApplyPatch stable-mm-hugetlb-fix-hugepage-memory-leak-in-mincore.patch
-ApplyPatch stable-mm-hugetlb-fix-hugepage-memory-leak-in-walk_page_range.patch
-ApplyPatch stable-powerpc-windfarm-Add-detection-for-second-cpu-pump.patch
-ApplyPatch stable-powerpc-therm_adt746x-Record-pwm-invert-bit-at-module-load-time.patch
-ApplyPatch stable-powerpc-Fix-usage-of-64-bit-instruction-in-32-bit-altivec-code.patch
-ApplyPatch stable-drm-radeon-kms-Add-quirk-for-HIS-X1300-board.patch
-ApplyPatch stable-drm-radeon-kms-handle-vblanks-properly-with-dpms-on.patch
-ApplyPatch stable-drm-radeon-kms-fix-legacy-crtc2-dpms.patch
-ApplyPatch stable-drm-radeon-kms-fix-vram-setup-on-rs600.patch
-ApplyPatch stable-drm-radeon-kms-rs6xx-rs740-clamp-vram-to-aperture-size.patch
-ApplyPatch stable-drm-ttm-Fix-build-failure-due-to-missing-struct-page.patch
-ApplyPatch stable-drm-i915-Set-the-error-code-after-failing-to-insert-new-offset-into-mm-ht.patch
-ApplyPatch stable-drm-i915-Add-the-missing-clonemask-for-display-port-on-Ironlake.patch
-ApplyPatch stable-xen-xenbus-make-DEVICE_ATTR-s-static.patch
-ApplyPatch stable-xen-re-register-runstate-area-earlier-on-resume.patch
-ApplyPatch stable-xen-restore-runstate_info-even-if-have_vcpu_info_placement.patch
-ApplyPatch stable-xen-correctly-restore-pfn_to_mfn_list_list-after-resume.patch
-ApplyPatch stable-xen-register-timer-interrupt-with-IRQF_TIMER.patch
-ApplyPatch stable-xen-register-runstate-on-secondary-CPUs.patch
-ApplyPatch stable-xen-don-t-call-dpm_resume_noirq-with-interrupts-disabled.patch
-ApplyPatch stable-xen-register-runstate-info-for-boot-CPU-early.patch
-ApplyPatch stable-xen-call-clock-resume-notifier-on-all-CPUs.patch
-ApplyPatch stable-xen-improve-error-handling-in-do_suspend.patch
-ApplyPatch stable-xen-don-t-leak-IRQs-over-suspend-resume.patch
-ApplyPatch stable-xen-use-iret-for-return-from-64b-kernel-to-32b-usermode.patch
-ApplyPatch stable-xen-explicitly-create-destroy-stop_machine-workqueues-outside-suspend-resume-region.patch
-ApplyPatch stable-Xen-balloon-fix-totalram_pages-counting.patch
-ApplyPatch stable-xen-try-harder-to-balloon-up-under-memory-pressure.patch
-ApplyPatch stable-slc90e66-fix-UDMA-handling.patch
-ApplyPatch stable-tcp-Stalling-connections-Fix-timeout-calculation-routine.patch
-ApplyPatch stable-ip_fragment-also-adjust-skb-truesize-for-packets-not-owned-by-a-socket.patch
-ApplyPatch stable-b44-WOL-setup-one-bit-off-stack-corruption-kernel-panic-fix.patch
-ApplyPatch stable-sparc64-Don-t-specify-IRQF_SHARED-for-LDC-interrupts.patch
-ApplyPatch stable-sparc64-Fix-overly-strict-range-type-matching-for-PCI-devices.patch
-ApplyPatch stable-sparc64-Fix-stack-debugging-IRQ-stack-regression.patch
-ApplyPatch stable-sparc-Set-UTS_MACHINE-correctly.patch
-ApplyPatch stable-b43legacy-avoid-PPC-fault-during-resume.patch
-ApplyPatch stable-tracing-Fix-event-format-export.patch
-ApplyPatch stable-ath9k-fix-tx-status-reporting.patch
-ApplyPatch stable-mac80211-Fix-dynamic-power-save-for-scanning.patch
-ApplyPatch stable-memcg-fix-memory-memsw-usage_in_bytes-for-root-cgroup.patch
-ApplyPatch stable-thinkpad-acpi-fix-default-brightness_mode-for-R50e-R51.patch
-ApplyPatch stable-thinkpad-acpi-preserve-rfkill-state-across-suspend-resume.patch
-ApplyPatch stable-ipw2100-fix-rebooting-hang-with-driver-loaded.patch
-ApplyPatch stable-matroxfb-fix-problems-with-display-stability.patch
-ApplyPatch stable-acerhdf-add-new-BIOS-versions.patch
-ApplyPatch stable-asus-laptop-change-light-sens-default-values.patch
-ApplyPatch stable-vmalloc-conditionalize-build-of-pcpu_get_vm_areas.patch
-ApplyPatch stable-ACPI-Use-the-ARB_DISABLE-for-the-CPU-which-model-id-is-less-than-0x0f.patch
-ApplyPatch stable-net-Fix-userspace-RTM_NEWLINK-notifications.patch
-ApplyPatch stable-ext3-Fix-data-filesystem-corruption-when-write-fails-to-copy-data.patch
-ApplyPatch stable-V4L-DVB-13116-gspca-ov519-Webcam-041e-4067-added.patch
-ApplyPatch stable-bcm63xx_enet-fix-compilation-failure-after-get_stats_count-removal.patch
-ApplyPatch stable-x86-Under-BIOS-control-restore-AP-s-APIC_LVTTHMR-to-the-BSP-value.patch
-ApplyPatch stable-drm-i915-Avoid-NULL-dereference-with-component_only-tv_modes.patch
-ApplyPatch stable-drm-i915-PineView-only-has-LVDS-and-CRT-ports.patch
-ApplyPatch stable-drm-i915-Fix-LVDS-stability-issue-on-Ironlake.patch
-ApplyPatch stable-mm-sigbus-instead-of-abusing-oom.patch
-ApplyPatch stable-ipvs-zero-usvc-and-udest.patch
-ApplyPatch stable-jffs2-Fix-long-standing-bug-with-symlink-garbage-collection.patch
-ApplyPatch stable-intel-iommu-ignore-page-table-validation-in-pass-through-mode.patch
-ApplyPatch stable-netfilter-xtables-document-minimal-required-version.patch
-ApplyPatch stable-perf_event-Fix-incorrect-range-check-on-cpu-number.patch
-ApplyPatch stable-implement-early_io-re-un-map-for-ia64.patch
-ApplyPatch stable-SCSI-ipr-fix-EEH-recovery.patch
-ApplyPatch stable-SCSI-qla2xxx-dpc-thread-can-execute-before-scsi-host-has-been-added.patch
-ApplyPatch stable-SCSI-st-fix-mdata-page_order-handling.patch
-ApplyPatch stable-SCSI-fc-class-fix-fc_transport_init-error-handling.patch
-ApplyPatch stable-sched-Fix-task_hot-test-order.patch
-ApplyPatch stable-x86-cpuid-Add-volatile-to-asm-in-native_cpuid.patch
-ApplyPatch stable-sched-Select_task_rq_fair-must-honour-SD_LOAD_BALANCE.patch
-ApplyPatch stable-clockevents-Prevent-clockevent_devices-list-corruption-on-cpu-hotplug.patch
-ApplyPatch stable-pata_hpt3x2n-fix-clock-turnaround.patch
-ApplyPatch stable-pata_cmd64x-fix-overclocking-of-UDMA0-2-modes.patch
-ApplyPatch stable-ASoC-wm8974-fix-a-wrong-bit-definition.patch
-ApplyPatch stable-sound-sgio2audio-pdaudiocf-usb-audio-initialize-PCM-buffer.patch
-ApplyPatch stable-ALSA-hda-Fix-missing-capsrc_nids-for-ALC88x.patch
-ApplyPatch stable-acerhdf-limit-modalias-matching-to-supported.patch
-ApplyPatch stable-ACPI-EC-Fix-MSI-DMI-detection.patch
-ApplyPatch stable-ACPI-Use-the-return-result-of-ACPI-lid-notifier-chain-correctly.patch
-ApplyPatch stable-powerpc-Handle-VSX-alignment-faults-correctly-in-little-endian-mode.patch
-ApplyPatch stable-ASoC-Do-not-write-to-invalid-registers-on-the-wm9712.patch
-ApplyPatch stable-drm-radeon-fix-build-on-64-bit-with-some-compilers.patch
-ApplyPatch stable-USB-emi62-fix-crash-when-trying-to-load-EMI-6-2-firmware.patch
-ApplyPatch stable-USB-option-support-hi-speed-for-modem-Haier-CE100.patch
-ApplyPatch stable-USB-Fix-a-bug-on-appledisplay-c-regarding-signedness.patch
-ApplyPatch stable-USB-musb-gadget_ep0-avoid-SetupEnd-interrupt.patch
-ApplyPatch stable-Bluetooth-Prevent-ill-timed-autosuspend-in-USB-driver.patch
-ApplyPatch stable-USB-rename-usb_configure_device.patch
-ApplyPatch stable-USB-fix-bugs-in-usb_-de-authorize_device.patch
-ApplyPatch stable-drivers-net-usb-Correct-code-taking-the-size-of-a-pointer.patch
-ApplyPatch stable-x86-SGI-UV-Fix-writes-to-led-registers-on-remote-uv-hubs.patch
-ApplyPatch stable-md-Fix-unfortunate-interaction-with-evms.patch
-ApplyPatch stable-dma-at_hdmac-correct-incompatible-type-for-argument-1-of-spin_lock_bh.patch
-ApplyPatch stable-dma-debug-Do-not-add-notifier-when-dma-debugging-is-disabled.patch
-ApplyPatch stable-dma-debug-Fix-bug-causing-build-warning.patch
-ApplyPatch stable-x86-amd-iommu-Fix-initialization-failure-panic.patch
-ApplyPatch stable-ioat3-fix-p-disabled-q-continuation.patch
-ApplyPatch stable-ioat2-3-put-channel-hardware-in-known-state-at-init.patch
-ApplyPatch stable-KVM-MMU-remove-prefault-from-invlpg-handler.patch
-ApplyPatch stable-KVM-LAPIC-make-sure-IRR-bitmap-is-scanned-after-vm-load.patch
-ApplyPatch stable-Libertas-fix-buffer-overflow-in-lbs_get_essid.patch
-ApplyPatch stable-iwmc3200wifi-fix-array-out-of-boundary-access.patch
-ApplyPatch stable-mac80211-fix-propagation-of-failed-hardware-reconfigurations.patch
-ApplyPatch stable-mac80211-fix-WMM-AP-settings-application.patch
-ApplyPatch stable-mac80211-Fix-IBSS-merge.patch
-ApplyPatch stable-cfg80211-fix-race-between-deauth-and-assoc-response.patch
-ApplyPatch stable-ath5k-fix-SWI-calibration-interrupt-storm.patch
-ApplyPatch stable-ath9k-wake-hardware-for-interface-IBSS-AP-Mesh-removal.patch
-ApplyPatch stable-ath9k-Fix-TX-queue-draining.patch
-ApplyPatch stable-ath9k-fix-missed-error-codes-in-the-tx-status-check.patch
-ApplyPatch stable-ath9k-wake-hardware-during-AMPDU-TX-actions.patch
-ApplyPatch stable-ath9k-fix-suspend-by-waking-device-prior-to-stop.patch
-ApplyPatch stable-ath9k_hw-Fix-possible-OOB-array-indexing-in-gen_timer_index-on-64-bit.patch
-ApplyPatch stable-ath9k_hw-Fix-AR_GPIO_INPUT_EN_VAL_BT_PRIORITY_BB-and-its-shift-value-in-0x4054.patch
-ApplyPatch stable-iwl3945-disable-power-save.patch
-ApplyPatch stable-iwl3945-fix-panic-in-iwl3945-driver.patch
-ApplyPatch stable-iwlwifi-fix-EEPROM-OTP-reading-endian-annotations-and-a-bug.patch
-ApplyPatch stable-iwlwifi-fix-more-eeprom-endian-bugs.patch
-ApplyPatch stable-iwlwifi-fix-40MHz-operation-setting-on-cards-that-do-not-allow-it.patch
-ApplyPatch stable-mac80211-fix-race-with-suspend-and-dynamic_ps_disable_work.patch
-ApplyPatch stable-NOMMU-Optimise-away-the-dac_-mmap_min_addr-tests.patch
-ApplyPatch stable-sysctl_max_map_count-should-be-non-negative.patch
-ApplyPatch stable-kernel-sysctl-c-fix-the-incomplete-part-of-sysctl_max_map_count-should-be-non-negative-patch.patch
-ApplyPatch stable-V4L-DVB-13596-ov511-c-typo-lock-unlock.patch
-ApplyPatch stable-x86-ptrace-make-genregs-32-_get-set-more-robust.patch
-ApplyPatch stable-memcg-avoid-oom-killing-innocent-task-in-case-of-use_hierarchy.patch
-ApplyPatch stable-e100-Fix-broken-cbs-accounting-due-to-missing-memset.patch
-ApplyPatch stable-ipv6-reassembly-use-seperate-reassembly-queues-for-conntrack-and-local-delivery.patch
-ApplyPatch stable-netfilter-fix-crashes-in-bridge-netfilter-caused-by-fragment-jumps.patch
-ApplyPatch stable-hwmon-sht15-Off-by-one-error-in-array-index-incorrect-constants.patch
-ApplyPatch stable-b43-avoid-PPC-fault-during-resume.patch
-ApplyPatch stable-Keys-KEYCTL_SESSION_TO_PARENT-needs-TIF_NOTIFY_RESUME-architecture-support.patch
-ApplyPatch stable-sched-Fix-balance-vs-hotplug-race.patch
-ApplyPatch stable-drm-radeon-kms-fix-crtc-vblank-update-for-r600.patch
-ApplyPatch stable-drm-disable-all-the-possible-outputs-crtcs-before-entering-KMS-mode.patch
-ApplyPatch stable-orinoco-fix-GFP_KERNEL-in-orinoco_set_key-with-interrupts-disabled.patch
-ApplyPatch stable-udf-Try-harder-when-looking-for-VAT-inode.patch
-ApplyPatch stable-Add-unlocked-version-of-inode_add_bytes-function.patch
-ApplyPatch stable-quota-decouple-fs-reserved-space-from-quota-reservation.patch
-ApplyPatch stable-ext4-Convert-to-generic-reserved-quota-s-space-management.patch
-ApplyPatch stable-ext4-fix-sleep-inside-spinlock-issue-with-quota-and-dealloc-14739.patch
-ApplyPatch stable-x86-msr-Unify-rdmsr_on_cpus-wrmsr_on_cpus.patch
-ApplyPatch stable-cpumask-use-modern-cpumask-style-in-drivers-edac-amd64_edac-c.patch
-ApplyPatch stable-amd64_edac-unify-MCGCTL-ECC-switching.patch
-ApplyPatch stable-x86-msr-Add-support-for-non-contiguous-cpumasks.patch
-ApplyPatch stable-x86-msr-msrs_alloc-free-for-CONFIG_SMP-n.patch
-ApplyPatch stable-amd64_edac-fix-driver-instance-freeing.patch
-ApplyPatch stable-amd64_edac-make-driver-loading-more-robust.patch
-ApplyPatch stable-amd64_edac-fix-forcing-module-load-unload.patch
-ApplyPatch stable-sched-Sched_rt_periodic_timer-vs-cpu-hotplug.patch
-ApplyPatch stable-ext4-Update-documentation-to-correct-the-inode_readahead_blks-option-name.patch
-ApplyPatch stable-lguest-fix-bug-in-setting-guest-GDT-entry.patch
-ApplyPatch stable-rt2x00-Disable-powersaving-for-rt61pci-and-rt2800pci.patch
-ApplyPatch stable-generic_permission-MAY_OPEN-is-not-write-access.patch
-ApplyPatch redhat-fix-typo-while-disabling-CONFIG_CPU_SUP_CENTAUR.patch
-ApplyPatch redhat-check-if-patchutils-is-installed-before-creating-patches.patch
-ApplyPatch redhat-do-a-basic-sanity-check-to-verify-the-modules-are-being-signed.patch
-ApplyPatch redhat-Fix-kABI-dependency-generation.patch
-ApplyPatch tpm-autoload-tpm_tis-driver.patch
-ApplyPatch x86-mce-fix-confusion-between-bank-attributes-and-mce-attributes.patch
-ApplyPatch netdrv-be2net-update-be2net-driver-to-latest-upstream.patch
-ApplyPatch s390x-tape-incomplete-device-removal.patch
-ApplyPatch s390-kernel-improve-code-generated-by-atomic-operations.patch
-ApplyPatch x86-AMD-Fix-stale-cpuid4_info-shared_map-data-in-shared_cpu_map-cpumasks.patch
-ApplyPatch nfs-fix-oops-in-nfs_rename.patch
-ApplyPatch modsign-Remove-Makefile-modpost-qualifying-message-for-module-sign-failure.patch
-ApplyPatch redhat-disable-framepointer-build-by-default.patch
-ApplyPatch redhat-use-sysconf-_SC_PAGESIZE-instead-of-getpagesize.patch
-ApplyPatch redhat-tagging-2-6-32-6-el6.patch
-ApplyPatch redhat-updating-lastcommit-for-2-6-32-6.patch
-ApplyPatch kvm-Dont-pass-kvm_run-arguments.patch
-ApplyPatch kvm-Call-pic_clear_isr-on-pic-reset-to-reuse-logic-there.patch
-ApplyPatch kvm-Move-irq-sharing-information-to-irqchip-level.patch
-ApplyPatch kvm-Change-irq-routing-table-to-use-gsi-indexed-array.patch
-ApplyPatch kvm-Maintain-back-mapping-from-irqchip-pin-to-gsi.patch
-ApplyPatch kvm-Move-irq-routing-data-structure-to-rcu-locking.patch
-ApplyPatch kvm-Move-irq-ack-notifier-list-to-arch-independent-code.patch
-ApplyPatch kvm-Convert-irq-notifiers-lists-to-RCU-locking.patch
-ApplyPatch kvm-Move-IO-APIC-to-its-own-lock.patch
-ApplyPatch kvm-Drop-kvm-irq_lock-lock-from-irq-injection-path.patch
-ApplyPatch kvm-Add-synchronize_srcu_expedited.patch
-ApplyPatch kvm-rcu-Add-synchronize_srcu_expedited-to-the-rcutorture-test-suite.patch
-ApplyPatch kvm-rcu-Add-synchronize_srcu_expedited-to-the-documentation.patch
-ApplyPatch kvm-rcu-Enable-synchronize_sched_expedited-fastpath.patch
-ApplyPatch kvm-modify-memslots-layout-in-struct-kvm.patch
-ApplyPatch kvm-modify-alias-layout-in-x86s-struct-kvm_arch.patch
-ApplyPatch kvm-split-kvm_arch_set_memory_region-into-prepare-and-commit.patch
-ApplyPatch kvm-introduce-gfn_to_pfn_memslot.patch
-ApplyPatch kvm-use-gfn_to_pfn_memslot-in-kvm_iommu_map_pages.patch
-ApplyPatch kvm-introduce-kvm-srcu-and-convert-kvm_set_memory_region-to-SRCU-update.patch
-ApplyPatch kvm-use-SRCU-for-dirty-log.patch
-ApplyPatch kvm-x86-switch-kvm_set_memory_alias-to-SRCU-update.patch
-ApplyPatch kvm-convert-io_bus-to-SRCU.patch
-ApplyPatch kvm-switch-vcpu-context-to-use-SRCU.patch
-ApplyPatch kvm-convert-slots_lock-to-a-mutex.patch
-ApplyPatch kvm-Bump-maximum-vcpu-count-to-64.patch
-ApplyPatch kvm-avoid-taking-ioapic-mutex-for-non-ioapic-EOIs.patch
-ApplyPatch kvm-VMX-Use-macros-instead-of-hex-value-on-cr0-initialization.patch
-ApplyPatch kvm-SVM-Reset-cr0-properly-on-vcpu-reset.patch
-ApplyPatch kvm-SVM-init_vmcb-remove-redundant-save-cr0-initialization.patch
-ApplyPatch kvm-fix-kvmclock-adjust-offset-ioctl-to-match-upstream.patch
-ApplyPatch kvm-x86-Add-KVM_GET-SET_VCPU_EVENTS.patch
-ApplyPatch kvm-x86-Extend-KVM_SET_VCPU_EVENTS-with-selective-updates.patch
-ApplyPatch kvm-remove-pre_task_link-setting-in-save_state_to_tss16.patch
-ApplyPatch kvm-SVM-Move-INTR-vmexit-out-of-atomic-code.patch
-ApplyPatch kvm-SVM-Notify-nested-hypervisor-of-lost-event-injections.patch
-ApplyPatch kvm-SVM-remove-needless-mmap_sem-acquision-from-nested_svm_map.patch
-ApplyPatch kvm-VMX-Disable-unrestricted-guest-when-EPT-disabled.patch
-ApplyPatch kvm-x86-disallow-multiple-KVM_CREATE_IRQCHIP.patch
-ApplyPatch kvm-x86-disallow-KVM_-SET-GET-_LAPIC-without-allocated-in-kernel-lapic.patch
-ApplyPatch kvm-x86-disable-paravirt-mmu-reporting.patch
-ApplyPatch kvm-Allow-internal-errors-reported-to-userspace-to-carry-extra-data.patch
-ApplyPatch kvm-VMX-Report-unexpected-simultaneous-exceptions-as-internal-errors.patch
-ApplyPatch kvm-fix-lock-imbalance-in-kvm_-_irq_source_id.patch
-ApplyPatch kvm-only-clear-irq_source_id-if-irqchip-is-present.patch
-ApplyPatch kvm-Fix-possible-circular-locking-in-kvm_vm_ioctl_assign_device.patch
-ApplyPatch block-Fix-incorrect-alignment-offset-reporting-and-update-documentation.patch
-ApplyPatch block-Correct-handling-of-bottom-device-misaligment.patch
-ApplyPatch block-Fix-discard-alignment-calculation-and-printing.patch
-ApplyPatch block-bdev_stack_limits-wrapper.patch
-ApplyPatch dm-Fix-device-mapper-topology-stacking.patch
-ApplyPatch block-Stop-using-byte-offsets.patch
-ApplyPatch dm-add-feature-flags-to-reduce-future-kABI-impact.patch
-ApplyPatch netdrv-igb-Update-igb-driver-to-support-Barton-Hills.patch
-ApplyPatch redhat-Don-t-compile-DECNET.patch
-ApplyPatch redhat-fs-don-t-build-freevxfs.patch
-ApplyPatch redhat-disable-KVM-on-non-x86_64-arches.patch
-ApplyPatch gfs-GFS2-Fix-up-system-xattrs.patch
-ApplyPatch gfs-VFS-Add-forget_all_cached_acls.patch
-ApplyPatch gfs-GFS2-Use-forget_all_cached_acls.patch
-ApplyPatch gfs-GFS2-Use-gfs2_set_mode-instead-of-munge_mode.patch
-ApplyPatch gfs-GFS2-Clean-up-ACLs.patch
-ApplyPatch gfs-GFS2-Add-cached-ACLs-support.patch
-ApplyPatch gfs-VFS-Use-GFP_NOFS-in-posix_acl_from_xattr.patch
-ApplyPatch gfs-GFS2-Fix-gfs2_xattr_acl_chmod.patch
-ApplyPatch gfs2-Fix-o-meta-mounts-for-subsequent-mounts.patch
-ApplyPatch gfs2-Alter-arguments-of-gfs2_quota-statfs_sync.patch
-ApplyPatch gfs2-Hook-gfs2_quota_sync-into-VFS-via-gfs2_quotactl_ops.patch
-ApplyPatch gfs2-Remove-obsolete-code-in-quota-c.patch
-ApplyPatch gfs2-Add-get_xstate-quota-function.patch
-ApplyPatch gfs2-Add-proper-error-reporting-to-quota-sync-via-sysfs.patch
-ApplyPatch gfs2-Remove-constant-argument-from-qdsb_get.patch
-ApplyPatch gfs2-Remove-constant-argument-from-qd_get.patch
-ApplyPatch gfs2-Clean-up-gfs2_adjust_quota-and-do_glock.patch
-ApplyPatch gfs2-Add-get_xquota-support.patch
-ApplyPatch gfs2-Add-set_xquota-support.patch
-ApplyPatch gfs2-Improve-statfs-and-quota-usability.patch
-ApplyPatch gfs2-remove-division-from-new-statfs-code.patch
-ApplyPatch gfs2-add-barrier-nobarrier-mount-options.patch
-ApplyPatch gfs2-only-show-nobarrier-option-on-proc-mounts-when-the-option-is-active.patch
-ApplyPatch gfs-GFS2-Fix-lock-ordering-in-gfs2_check_blk_state.patch
-ApplyPatch gfs-GFS2-Fix-locking-bug-in-rename.patch
-ApplyPatch gfs-GFS2-Ensure-uptodate-inode-size-when-using-O_APPEND.patch
-ApplyPatch gfs-GFS2-Fix-glock-refcount-issues.patch
-ApplyPatch powerpc-pseries-Add-extended_cede_processor-helper-function.patch
-ApplyPatch powerpc-pseries-Add-hooks-to-put-the-CPU-into-an-appropriate-offline-state.patch
-ApplyPatch powerpc-Kernel-handling-of-Dynamic-Logical-Partitioning.patch
-ApplyPatch powerpc-sysfs-cpu-probe-release-files.patch
-ApplyPatch powerpc-CPU-DLPAR-handling.patch
-ApplyPatch powerpc-Add-code-to-online-offline-CPUs-of-a-DLPAR-node.patch
-ApplyPatch powerpc-cpu-allocation-deallocation-process.patch
-ApplyPatch powerpc-pseries-Correct-pseries-dlpar-c-build-break-without-CONFIG_SMP.patch
-ApplyPatch net-dccp-fix-module-load-dependency-btw-dccp_probe-and-dccp.patch
-ApplyPatch drm-drm-edid-update-to-2-6-33-EDID-parser-code.patch
-ApplyPatch drm-mm-patch-drm-core-memory-range-manager-up-to-2-6-33.patch
-ApplyPatch drm-ttm-rollup-upstream-TTM-fixes.patch
-ApplyPatch drm-unlocked-ioctl-support-for-core-macro-fixes.patch
-ApplyPatch drm-add-new-userspace-core-drm-interfaces-from-2-6-33.patch
-ApplyPatch drm-remove-address-mask-param-for-drm_pci_alloc.patch
-ApplyPatch drm-kms-rollup-KMS-core-and-helper-changes-to-2-6-33.patch
-ApplyPatch drm-radeon-intel-realign-displayport-helper-code-with-upstream.patch
-ApplyPatch drm-i915-bring-Intel-DRM-KMS-driver-up-to-2-6-33.patch
-ApplyPatch drm-radeon-kms-update-to-2-6-33-without-TTM-API-changes.patch
-ApplyPatch drm-ttm-validation-API-changes-ERESTART-fixes.patch
-ApplyPatch drm-nouveau-update-to-2-6-33-level.patch
-ApplyPatch x86-allow-fbdev-primary-video-code-on-64-bit.patch
-ApplyPatch offb-add-support-for-framebuffer-handoff-to-offb.patch
-ApplyPatch drm-minor-printk-fixes-from-upstream.patch
-ApplyPatch redhat-tagging-2-6-32-7-el6.patch
-ApplyPatch redhat-updating-lastcommit-for-2-6-32-7.patch
-ApplyPatch build-Revert-redhat-disabling-temporaly-DEVTMPFS.patch
-ApplyPatch redhat-tagging-2-6-32-8-el6.patch
-ApplyPatch redhat-updating-lastcommit-for-2-6-32-8.patch
-ApplyPatch serial-8250-add-support-for-DTR-DSR-hardware-flow-control.patch
-ApplyPatch s390x-qeth-Support-for-HiperSockets-Network-Traffic-Analyzer.patch
-ApplyPatch s390-qeth-fix-packet-loss-if-TSO-is-switched-on.patch
-ApplyPatch s390x-tape-Add-pr_fmt-macro-to-all-tape-source-files.patch
-ApplyPatch net-dccp-modify-how-dccp-creates-slab-caches-to-prevent-bug-halt-in-SLUB.patch
-ApplyPatch scsi-sync-fcoe-with-upstream.patch
-ApplyPatch block-Honor-the-gfp_mask-for-alloc_page-in-blkdev_issue_discard.patch
-ApplyPatch sound-ALSA-HDA-driver-update-2009-12-15-2.patch
-ApplyPatch scsi-mpt2sas-use-sas-address-instead-of-handle-as-a-lookup.patch
-ApplyPatch scsi-mpt2sas-fix-expander-remove-fail.patch
-ApplyPatch scsi-mpt2sas-check-for-valid-response-info.patch
-ApplyPatch scsi-mpt2sas-new-device-SAS2208-support.patch
-ApplyPatch scsi-mpt2sas-adding-MPI-Headers-revision-L.patch
-ApplyPatch scsi-mpt2sas-stop-driver-when-firmware-encounters-faults.patch
-ApplyPatch scsi-mpt2sas-fix-some-comments.patch
-ApplyPatch scsi-mpt2sas-add-command-line-option-diag_buffer_enable.patch
-ApplyPatch scsi-mpt2sas-add-extended-type-for-diagnostic-buffer-support.patch
-ApplyPatch scsi-mpt2sas-add-TimeStamp-support-when-sending-ioc_init.patch
-ApplyPatch scsi-mpt2sas-limit-the-max_depth-to-32-for-SATA-devices.patch
-ApplyPatch scsi-mpt2sas-add-new-info-messages-for-IR-and-Expander-events.patch
-ApplyPatch scsi-mpt2sas-retrieve-the-ioc-facts-prior-to-putting-the-controller-into-READY-state.patch
-ApplyPatch scsi-mpt2sas-return-DID_TRANSPORT_DISRUPTED-in-nexus-loss-and-SCSI_MLQUEUE_DEVICE_BUSY-if-device-is-busy.patch
-ApplyPatch scsi-mpt2sas-mpt2sas_base_get_sense_buffer_dma-returns-little-endian.patch
-ApplyPatch scsi-mpt2sas-fix-PPC-endian-bug.patch
-ApplyPatch scsi-mpt2sas-freeze-the-sdev-IO-queue-when-firmware-sends-internal-device-reset.patch
-ApplyPatch scsi-mpt2sas-add-support-for-RAID-Action-System-Shutdown-Initiated-at-OS-Shutdown.patch
-ApplyPatch scsi-mpt2sas-don-t-update-links-nor-unblock-device-at-no-link-rate-change.patch
-ApplyPatch scsi-mpt2sas-Bump-version-03-100-03-00.patch
-ApplyPatch scsi-megaraid-upgrade-to-4-17.patch
-ApplyPatch uv-x86-SGI-Dont-track-GRU-space-in-PAT.patch
-ApplyPatch uv-x86-mm-Call-is_untracked_pat_range-rather-than-is_ISA_range.patch
-ApplyPatch uv-x86-mm-is_untracked_pat_range-takes-a-normal-semiclosed-range.patch
-ApplyPatch uv-x86-platform-Change-is_untracked_pat_range-to-bool.patch
-ApplyPatch uv-x86-Change-is_ISA_range-into-an-inline-function.patch
-ApplyPatch uv-x86-mm-Correct-the-implementation-of-is_untracked_pat_range.patch
-ApplyPatch uv-x86-RTC-Rename-generic_interrupt-to-x86_platform_ipi.patch
-ApplyPatch uv-x86-RTC-Always-enable-RTC-clocksource.patch
-ApplyPatch uv-x86-SGI-Fix-irq-affinity-for-hub-based-interrupts.patch
-ApplyPatch uv-x86-apic-Move-SGI-UV-functionality-out-of-generic-IO-APIC-code.patch
-ApplyPatch uv-x86-irq-Allow-0xff-for-proc-irq-n-smp_affinity-on-an-8-cpu-system.patch
-ApplyPatch uv-x86-Remove-move_cleanup_count-from-irq_cfg.patch
-ApplyPatch uv-x86-irq-Check-move_in_progress-before-freeing-the-vector-mapping.patch
-ApplyPatch uv-xpc-needs-to-provide-an-abstraction-for-uv_gpa.patch
-ApplyPatch uv-x86-update-XPC-to-handle-updated-BIOS-interface.patch
-ApplyPatch uv-x86-xpc-NULL-deref-when-mesq-becomes-empty.patch
-ApplyPatch uv-x86-xpc_make_first_contact-hang-due-to-not-accepting-ACTIVE-state.patch
-ApplyPatch uv-x86-XPC-receive-message-reuse-triggers-invalid-BUG_ON.patch
-ApplyPatch uv-XPC-pass-nasid-instead-of-nid-to-gru_create_message_queue.patch
-ApplyPatch gru-GRU-Rollup-patch.patch
-ApplyPatch uv-React-2-6-32-y-isolcpus-broken-in-2-6-32-y-kernel.patch
-ApplyPatch nfs-nfsd-make-sure-data-is-on-disk-before-calling-fsync.patch
-ApplyPatch nfs-sunrpc-fix-peername-failed-on-closed-listener.patch
-ApplyPatch nfs-SUNRPC-Fix-up-an-error-return-value-in-gss_import_sec_context_kerberos.patch
-ApplyPatch nfs-SUNRPC-Fix-the-return-value-in-gss_import_sec_context.patch
-ApplyPatch nfs-sunrpc-on-successful-gss-error-pipe-write-don-t-return-error.patch
-ApplyPatch nfs-sunrpc-fix-build-time-warning.patch
-ApplyPatch scsi-bfa-update-from-2-1-2-0-to-2-1-2-1.patch
-ApplyPatch scsi-qla2xxx-Update-support-for-FC-FCoE-HBA-CNA.patch
-ApplyPatch irq-Expose-the-irq_desc-node-as-proc-irq-node.patch
-ApplyPatch cgroups-fix-for-kernel-BUG-at-kernel-cgroup-c-790.patch
-ApplyPatch tracing-tracepoint-Add-signal-tracepoints.patch
-ApplyPatch block-direct-io-cleanup-blockdev_direct_IO-locking.patch
-ApplyPatch pci-PCIe-AER-honor-ACPI-HEST-FIRMWARE-FIRST-mode.patch
-ApplyPatch x86-Add-kernel-pagefault-tracepoint-for-x86-x86_64.patch
-ApplyPatch fs-xfs-2-6-33-updates.patch
-ApplyPatch x86-dell-wmi-Add-support-for-new-Dell-systems.patch
-ApplyPatch x86-core-make-LIST_POISON-less-deadly.patch
-ApplyPatch kvm-fix-cleanup_srcu_struct-on-vm-destruction.patch
-ApplyPatch redhat-tagging-2-6-32-9-el6.patch
-ApplyPatch redhat-updating-lastcommit-for-2-6-32-9.patch
-ApplyPatch scsi-scsi_transport_fc-Allow-LLD-to-reset-FC-BSG-timeout.patch
-ApplyPatch s390x-zfcp-introduce-BSG-timeout-callback.patch
-ApplyPatch s390x-zfcp-set-HW-timeout-requested-by-BSG-request.patch
-ApplyPatch redhat-config-increase-printk-buffer.patch
-ApplyPatch netdrv-qlge-update-to-upstream-version-v1-00-00-23-00-00-01.patch
-ApplyPatch gfs-Add-quota-netlink-support.patch
-ApplyPatch gfs-Use-dquot_send_warning.patch
-ApplyPatch netdrv-e1000e-update-to-the-latest-upstream.patch
-ApplyPatch x86-Disable-Memory-hot-add-on-x86-32-bit.patch
-ApplyPatch utrace-fix-utrace_maybe_reap-vs-find_matching_engine-race.patch
-ApplyPatch perf-add-kernel-internal-interface.patch
-ApplyPatch perf-improve-error-reporting.patch
-ApplyPatch perf-Add-a-callback-to-perf-events.patch
-ApplyPatch perf-Allow-for-custom-overflow-handlers.patch
-ApplyPatch perf-Fix-PERF_FORMAT_GROUP-scale-info.patch
-ApplyPatch perf-Fix-event-scaling-for-inherited-counters.patch
-ApplyPatch perf-Fix-locking-for-PERF_FORMAT_GROUP.patch
-ApplyPatch perf-Use-overflow-handler-instead-of-the-event-callback.patch
-ApplyPatch perf-Remove-the-event-callback-from-perf-events.patch
-ApplyPatch s390x-ptrace-dont-abuse-PT_PTRACED.patch
-ApplyPatch s390x-fix-loading-of-PER-control-registers-for-utrace.patch
-ApplyPatch scsi-aic79xx-check-for-non-NULL-scb-in-ahd_handle_nonpkt_busfree.patch
-ApplyPatch sound-Fix-SPDIF-In-for-AD1988-codecs-add-Intel-Cougar-IDs.patch
-ApplyPatch x86-Force-irq-complete-move-during-cpu-offline.patch
-ApplyPatch netdrv-vxge-fix-issues-found-in-Neterion-testing.patch
-ApplyPatch mm-mmap-don-t-return-ENOMEM-when-mapcount-is-temporarily-exceeded-in-munmap.patch
-ApplyPatch redhat-tagging-2-6-32-10-el6.patch
-ApplyPatch redhat-updating-lastcommit-for-2-6-32-10.patch
-ApplyPatch stable-untangle-the-do_mremap-mess.patch
-ApplyPatch stable-fasync-split-fasync_helper-into-separate-add-remove-functions.patch
-ApplyPatch stable-ASoC-fix-params_rate-macro-use-in-several-codecs.patch
-ApplyPatch stable-modules-Skip-empty-sections-when-exporting-section-notes.patch
-ApplyPatch stable-exofs-simple_write_end-does-not-mark_inode_dirty.patch
-ApplyPatch stable-Revert-x86-Side-step-lguest-problem-by-only-building-cmpxchg8b_emu-for-pre-Pentium.patch
-ApplyPatch stable-rtc_cmos-convert-shutdown-to-new-pnp_driver-shutdown.patch
-ApplyPatch stable-drivers-cpuidle-governors-menu-c-fix-undefined-reference-to-__udivdi3.patch
-ApplyPatch stable-lib-rational-c-needs-module-h.patch
-ApplyPatch stable-dma-debug-allow-DMA_BIDIRECTIONAL-mappings-to-be-synced-with-DMA_FROM_DEVICE-and.patch
-ApplyPatch stable-kernel-signal-c-fix-kernel-information-leak-with-print-fatal-signals-1.patch
-ApplyPatch stable-mmc_block-add-dev_t-initialization-check.patch
-ApplyPatch stable-mmc_block-fix-probe-error-cleanup-bug.patch
-ApplyPatch stable-mmc_block-fix-queue-cleanup.patch
-ApplyPatch stable-ALSA-ac97-Add-Dell-Dimension-2400-to-Headphone-Line-Jack-Sense-blacklist.patch
-ApplyPatch stable-ALSA-atiixp-Specify-codec-for-Foxconn-RC4107MA-RS2.patch
-ApplyPatch stable-ASoC-Fix-WM8350-DSP-mode-B-configuration.patch
-ApplyPatch stable-netfilter-ebtables-enforce-CAP_NET_ADMIN.patch
-ApplyPatch stable-netfilter-nf_ct_ftp-fix-out-of-bounds-read-in-update_nl_seq.patch
-ApplyPatch stable-hwmon-coretemp-Fix-TjMax-for-Atom-N450-D410-D510-CPUs.patch
-ApplyPatch stable-hwmon-adt7462-Fix-pin-28-monitoring.patch
-ApplyPatch stable-quota-Fix-dquot_transfer-for-filesystems-different-from-ext4.patch
-ApplyPatch stable-xen-fix-hang-on-suspend.patch
-ApplyPatch stable-iwlwifi-fix-iwl_queue_used-bug-when-read_ptr-write_ptr.patch
-ApplyPatch stable-ath5k-Fix-eeprom-checksum-check-for-custom-sized-eeproms.patch
-ApplyPatch stable-cfg80211-fix-syntax-error-on-user-regulatory-hints.patch
-ApplyPatch stable-iwl-off-by-one-bug.patch
-ApplyPatch stable-mac80211-add-missing-sanity-checks-for-action-frames.patch
-ApplyPatch stable-libertas-Remove-carrier-signaling-from-the-scan-code.patch
-ApplyPatch stable-kernel-sysctl-c-fix-stable-merge-error-in-NOMMU-mmap_min_addr.patch
-ApplyPatch stable-mac80211-fix-skb-buffering-issue-and-fixes-to-that.patch
-ApplyPatch stable-fix-braindamage-in-audit_tree-c-untag_chunk.patch
-ApplyPatch stable-fix-more-leaks-in-audit_tree-c-tag_chunk.patch
-ApplyPatch stable-module-handle-ppc64-relocating-kcrctabs-when-CONFIG_RELOCATABLE-y.patch
-ApplyPatch stable-ipv6-skb_dst-can-be-NULL-in-ipv6_hop_jumbo.patch
-ApplyPatch misc-Revert-stable-module-handle-ppc64-relocating-kcrctabs-when-CONFIG_RELOCATABLE-y.patch
-ApplyPatch netdrv-e1000e-enhance-frame-fragment-detection.patch
-ApplyPatch redhat-kABI-internal-only-files.patch
-ApplyPatch drm-bring-RHEL6-radeon-drm-up-to-2-6-33-rc4-5-level.patch
-ApplyPatch s390x-qeth-set-default-BLKT-settings-dependend-on-OSA-hw-level.patch
-ApplyPatch block-dm-replicator-documentation-and-module-registry.patch
-ApplyPatch block-dm-replicator-replication-log-and-site-link-handler-interfaces-and-main-replicator-module.patch
-ApplyPatch block-dm-replicator-ringbuffer-replication-log-handler.patch
-ApplyPatch block-dm-replicator-blockdev-site-link-handler.patch
-ApplyPatch block-dm-raid45-add-raid45-target.patch
-ApplyPatch dm-dm-raid45-export-missing-dm_rh_inc.patch
-ApplyPatch kdump-Remove-the-32MB-limitation-for-crashkernel.patch
-ApplyPatch redhat-tagging-2-6-32-11-el6.patch
-ApplyPatch redhat-updating-lastcommit-for-2-6-32-11.patch
-ApplyPatch redhat-Revert-edac-amd64_edac-disabling-temporarily.patch
-ApplyPatch x86-Use-EOI-register-in-io-apic-on-intel-platforms.patch
-ApplyPatch x86-Remove-local_irq_enable-local_irq_disable-in-fixup_irqs.patch
-ApplyPatch x86-io-apic-Move-the-effort-of-clearing-remoteIRR-explicitly-before-migrating-the-irq.patch
-ApplyPatch x86-ioapic-Fix-the-EOI-register-detection-mechanism.patch
-ApplyPatch x86-ioapic-Document-another-case-when-level-irq-is-seen-as-an-edge.patch
-ApplyPatch x86-Remove-unnecessary-mdelay-from-cpu_disable_common.patch
-ApplyPatch redhat-rpadlpar_io-should-be-built-in-kernel.patch
-ApplyPatch x86-msr-cpuid-Register-enough-minors-for-the-MSR-and-CPUID-drivers.patch
-ApplyPatch scsi-Sync-be2iscsi-with-upstream.patch
-ApplyPatch redhat-config-disable-CONFIG_X86_CPU_DEBUG.patch
-ApplyPatch pci-Always-set-prefetchable-base-limit-upper32-registers.patch
-ApplyPatch mm-Memory-tracking-for-Stratus.patch
-ApplyPatch redhat-enable-Memory-tracking-for-Stratus.patch
-ApplyPatch drm-radeon-possible-security-issue.patch
-ApplyPatch redhat-tagging-2-6-32-12-el6.patch
-ApplyPatch redhat-updating-lastcommit-for-2-6-32-12.patch
-ApplyPatch mm-Memory-tracking-for-Stratus-2.patch
-ApplyPatch kdump-backport-upstream-ppc64-kcrctab-fixes.patch
-ApplyPatch x86-acpi-Export-acpi_pci_irq_-add-del-_prt.patch
-ApplyPatch kvm-Fix-race-between-APIC-TMR-and-IRR.patch
-ApplyPatch kvm-x86-Fix-host_mapping_level.patch
-ApplyPatch kvm-MMU-bail-out-pagewalk-on-kvm_read_guest-error.patch
-ApplyPatch kvm-x86-Fix-probable-memory-leak-of-vcpu-arch-mce_banks.patch
-ApplyPatch kvm-x86-Fix-leak-of-free-lapic-date-in-kvm_arch_vcpu_init.patch
-ApplyPatch kvm-only-allow-one-gsi-per-fd.patch
-ApplyPatch kvm-properly-check-max-PIC-pin-in-irq-route-setup.patch
-ApplyPatch kvm-eventfd-allow-atomic-read-and-waitqueue-remove.patch
-ApplyPatch kvm-fix-spurious-interrupt-with-irqfd.patch
-ApplyPatch x86-Add-AMD-Node-ID-MSR-support.patch
-ApplyPatch x86-Fix-crash-when-profiling-more-than-28-events.patch
-ApplyPatch virtio-console-comment-cleanup.patch
-ApplyPatch virtio-console-statically-initialize-virtio_cons.patch
-ApplyPatch virtio-hvc_console-make-the-ops-pointer-const.patch
-ApplyPatch virtio-hvc_console-Remove-__devinit-annotation-from-hvc_alloc.patch
-ApplyPatch virtio-console-We-support-only-one-device-at-a-time.patch
-ApplyPatch virtio-console-port-encapsulation.patch
-ApplyPatch virtio-console-encapsulate-buffer-information-in-a-struct.patch
-ApplyPatch virtio-console-ensure-add_inbuf-can-work-for-multiple-ports-as-well.patch
-ApplyPatch virtio-console-introduce-a-get_inbuf-helper-to-fetch-bufs-from-in_vq.patch
-ApplyPatch virtio-console-use-vdev-priv-to-avoid-accessing-global-var.patch
-ApplyPatch virtio-console-don-t-assume-a-single-console-port.patch
-ApplyPatch virtio-console-remove-global-var.patch
-ApplyPatch virtio-console-struct-ports-for-multiple-ports-per-device.patch
-ApplyPatch virtio-console-ensure-console-size-is-updated-on-hvc-open.patch
-ApplyPatch virtio-console-Separate-out-console-specific-data-into-a-separate-struct.patch
-ApplyPatch virtio-console-Separate-out-console-init-into-a-new-function.patch
-ApplyPatch virtio-console-Separate-out-find_vqs-operation-into-a-different-function.patch
-ApplyPatch virtio-console-Introduce-function-to-hand-off-data-from-host-to-readers.patch
-ApplyPatch virtio-console-Introduce-a-send_buf-function-for-a-common-path-for-sending-data-to-host.patch
-ApplyPatch virtio-console-Add-a-new-MULTIPORT-feature-support-for-generic-ports.patch
-ApplyPatch virtio-console-Prepare-for-writing-to-reading-from-userspace-buffers.patch
-ApplyPatch virtio-console-Associate-each-port-with-a-char-device.patch
-ApplyPatch virtio-console-Add-file-operations-to-ports-for-open-read-write-poll.patch
-ApplyPatch virtio-console-Ensure-only-one-process-can-have-a-port-open-at-a-time.patch
-ApplyPatch virtio-console-Register-with-sysfs-and-create-a-name-attribute-for-ports.patch
-ApplyPatch virtio-console-Remove-cached-data-on-port-close.patch
-ApplyPatch virtio-console-Handle-port-hot-plug.patch
-ApplyPatch virtio-Add-ability-to-detach-unused-buffers-from-vrings.patch
-ApplyPatch virtio-hvc_console-Export-GPL-ed-hvc_remove.patch
-ApplyPatch virtio-console-Add-ability-to-hot-unplug-ports.patch
-ApplyPatch virtio-console-Add-debugfs-files-for-each-port-to-expose-debug-info.patch
-ApplyPatch virtio-console-show-error-message-if-hvc_alloc-fails-for-console-ports.patch
-ApplyPatch redhat-tagging-2-6-32-13-el6.patch
-ApplyPatch redhat-updating-lastcommit-for-2-6-32-13.patch
-ApplyPatch uv-x86-Add-function-retrieving-node-controller-revision-number.patch
-ApplyPatch uv-x86-Ensure-hub-revision-set-for-all-ACPI-modes.patch
-ApplyPatch s390x-cio-channel-path-vary-operation-has-no-effect.patch
-ApplyPatch s390x-zcrypt-Do-not-remove-coprocessor-in-case-of-error-8-72.patch
-ApplyPatch s390x-dasd-Fix-null-pointer-in-s390dbf-and-discipline-checking.patch
-ApplyPatch redhat-Enable-oprofile-multiplexing-on-x86_64-and-x86-architectures-only.patch
-ApplyPatch netdrv-update-tg3-to-version-3-106-and-fix-panic.patch
-ApplyPatch redhat-disable-CONFIG_OPTIMIZE_FOR_SIZE.patch
-ApplyPatch s390x-dasd-fix-online-offline-race.patch
-ApplyPatch redhat-tagging-2-6-32-14-el6.patch
-ApplyPatch redhat-updating-lastcommit-for-2-6-32-14.patch
-ApplyPatch gfs-GFS2-Fix-refcnt-leak-on-gfs2_follow_link-error-path.patch
-ApplyPatch gfs-GFS2-Use-GFP_NOFS-for-alloc-structure.patch
-ApplyPatch gfs-GFS2-Use-MAX_LFS_FILESIZE-for-meta-inode-size.patch
-ApplyPatch gfs-GFS2-Wait-for-unlock-completion-on-umount.patch
-ApplyPatch gfs-GFS2-Extend-umount-wait-coverage-to-full-glock-lifetime.patch
-ApplyPatch x86-intr-remap-generic-support-for-remapping-HPET-MSIs.patch
-ApplyPatch x86-arch-specific-support-for-remapping-HPET-MSIs.patch
-ApplyPatch x86-Disable-HPET-MSI-on-ATI-SB700-SB800.patch
-ApplyPatch fs-ext4-fix-type-of-offset-in-ext4_io_end.patch
-ApplyPatch redhat-disable-CONFIG_DEBUG_PERF_USE_VMALLOC-on-production-kernels.patch
-ApplyPatch x86-fix-Add-AMD-Node-ID-MSR-support.patch
-ApplyPatch redhat-config-disable-CONFIG_VMI.patch
-ApplyPatch quota-64-bit-quota-format-fixes.patch
-ApplyPatch block-cfq-Do-not-idle-on-async-queues-and-drive-deeper-WRITE-depths.patch
-ApplyPatch block-blk-cgroup-Fix-lockdep-warning-of-potential-deadlock-in-blk-cgroup.patch
-ApplyPatch redhat-tagging-2-6-32-15-el6.patch
-ApplyPatch redhat-updating-lastcommit-for-2-6-32-15.patch
-ApplyPatch redhat-x86_64-enable-function-tracers.patch
-ApplyPatch nfs-nfsd41-nfsd4_decode_compound-does-not-recognize-all-ops.patch
-ApplyPatch nfs-nfsd4-Use-FIRST_NFS4_OP-in-nfsd4_decode_compound.patch
-ApplyPatch nfs-nfsd-use-vfs_fsync-for-non-directories.patch
-ApplyPatch nfs-nfsd41-Create-the-recovery-entry-for-the-NFSv4-1-client.patch
-ApplyPatch nfs-nfsd-4-1-has-an-rfc-number.patch
-ApplyPatch nfs-SUNRPC-Use-rpc_pton-in-ip_map_parse.patch
-ApplyPatch nfs-NFSD-Support-AF_INET6-in-svc_addsock-function.patch
-ApplyPatch nfs-SUNRPC-Bury-ifdef-IPV6-in-svc_create_xprt.patch
-ApplyPatch nfs-SUNRPC-NFS-kernel-APIs-shouldn-t-return-ENOENT-for-transport-not-found.patch
-ApplyPatch nfs-NFSD-Create-PF_INET6-listener-in-write_ports.patch
-ApplyPatch nfs-nfs41-Adjust-max-cache-response-size-value.patch
-ApplyPatch nfs-nfs41-Check-slot-table-for-referring-calls.patch
-ApplyPatch nfs-nfs41-Process-callback-s-referring-call-list.patch
-ApplyPatch nfs-nfs41-fix-wrong-error-on-callback-header-xdr-overflow.patch
-ApplyPatch nfs-nfs41-directly-encode-back-channel-error.patch
-ApplyPatch nfs-nfs41-remove-uneeded-checks-in-callback-processing.patch
-ApplyPatch nfs-nfs41-prepare-for-back-channel-drc.patch
-ApplyPatch nfs-nfs41-back-channel-drc-minimal-implementation.patch
-ApplyPatch nfs-nfs41-implement-cb_recall_slot.patch
-ApplyPatch nfs-nfs41-resize-slot-table-in-reset.patch
-ApplyPatch nfs-nfs41-fix-nfs4_callback_recallslot.patch
-ApplyPatch nfs-nfs41-clear-NFS4CLNT_RECALL_SLOT-bit-on-session-reset.patch
-ApplyPatch nfs-nfs41-cleanup-callback-code-to-use-__be32-type.patch
-ApplyPatch nfs-Fix-a-reference-leak-in-nfs_wb_cancel_page.patch
-ApplyPatch nfs-Try-to-commit-unstable-writes-in-nfs_release_page.patch
-ApplyPatch nfs-Make-nfs_commitdata_release-static.patch
-ApplyPatch nfs-Avoid-warnings-when-CONFIG_NFS_V4-n.patch
-ApplyPatch nfs-Ensure-that-the-NFSv4-locking-can-recover-from-stateid-errors.patch
-ApplyPatch nfs-NFSv4-Don-t-allow-posix-locking-against-servers-that-don-t-support-it.patch
-ApplyPatch nfs-NFSv4-1-Don-t-call-nfs4_schedule_state_recovery-unnecessarily.patch
-ApplyPatch nfs-Ensure-that-we-handle-NFS4ERR_STALE_STATEID-correctly.patch
-ApplyPatch nfs-sunrpc-cache-fix-module-refcnt-leak-in-a-failure-path.patch
-ApplyPatch scsi-lpfc-Update-from-8-3-4-to-8-3-5-4-FC-FCoE.patch
-ApplyPatch dm-fix-kernel-panic-at-releasing-bio-on-recovery-failed-region.patch
-ApplyPatch dm-dm-raid1-fix-deadlock-at-suspending-failed-device.patch
-ApplyPatch vhost-fix-high-32-bit-in-FEATURES-ioctls.patch
-ApplyPatch vhost-prevent-modification-of-an-active-ring.patch
-ApplyPatch vhost-add-access_ok-checks.patch
-ApplyPatch vhost-make-default-mapping-empty-by-default.patch
-ApplyPatch vhost-access-check-thinko-fixes.patch
-ApplyPatch vhost-vhost-net-comment-use-of-invalid-fd-when-setting-vhost-backend.patch
-ApplyPatch vhost-vhost-net-defer-f-private_data-until-setup-succeeds.patch
-ApplyPatch vhost-fix-TUN-m-VHOST_NET-y.patch
-ApplyPatch kvm-emulate-accessed-bit-for-EPT.patch
-ApplyPatch net-nf_conntrack-fix-memory-corruption.patch
-ApplyPatch nfs-nfs4-handle-EKEYEXPIRED-errors-from-RPC-layer.patch
-ApplyPatch nfs-sunrpc-parse-and-return-errors-reported-by-gssd.patch
-ApplyPatch nfs-handle-NFSv2-EKEYEXPIRED-returns-from-RPC-layer-appropriately.patch
-ApplyPatch nfs-nfs-handle-NFSv3-EKEYEXPIRED-errors-as-we-would-EJUKEBOX.patch
-ApplyPatch oprofile-Support-Nehalem-EX-CPU-in-Oprofile.patch
-ApplyPatch mm-define-MADV_HUGEPAGE.patch
-ApplyPatch mm-add-a-compound_lock.patch
-ApplyPatch mm-alter-compound-get_page-put_page.patch
-ApplyPatch mm-update-futex-compound-knowledge.patch
-ApplyPatch mm-clear-compound-mapping.patch
-ApplyPatch mm-add-native_set_pmd_at.patch
-ApplyPatch mm-add-pmd-paravirt-ops.patch
-ApplyPatch mm-no-paravirt-version-of-pmd-ops.patch
-ApplyPatch mm-export-maybe_mkwrite.patch
-ApplyPatch mm-comment-reminder-in-destroy_compound_page.patch
-ApplyPatch mm-config_transparent_hugepage.patch
-ApplyPatch mm-special-pmd_trans_-functions.patch
-ApplyPatch mm-add-pmd-mangling-generic-functions.patch
-ApplyPatch mm-add-pmd-mangling-functions-to-x86.patch
-ApplyPatch mm-bail-out-gup_fast-on-splitting-pmd.patch
-ApplyPatch mm-pte-alloc-trans-splitting.patch
-ApplyPatch mm-add-pmd-mmu_notifier-helpers.patch
-ApplyPatch mm-clear-page-compound.patch
-ApplyPatch mm-add-pmd_huge_pte-to-mm_struct.patch
-ApplyPatch mm-split_huge_page_mm-vma.patch
-ApplyPatch mm-split_huge_page-paging.patch
-ApplyPatch mm-clear_huge_page-fix.patch
-ApplyPatch mm-clear_copy_huge_page.patch
-ApplyPatch mm-kvm-mmu-transparent-hugepage-support.patch
-ApplyPatch mm-backport-page_referenced-microoptimization.patch
-ApplyPatch mm-introduce-_GFP_NO_KSWAPD.patch
-ApplyPatch mm-dont-alloc-harder-for-gfp-nomemalloc-even-if-nowait.patch
-ApplyPatch mm-transparent-hugepage-core.patch
-ApplyPatch mm-verify-pmd_trans_huge-isnt-leaking.patch
-ApplyPatch mm-madvise-MADV_HUGEPAGE.patch
-ApplyPatch mm-pmd_trans_huge-migrate-bugcheck.patch
-ApplyPatch mm-memcg-compound.patch
-ApplyPatch mm-memcg-huge-memory.patch
-ApplyPatch mm-transparent-hugepage-vmstat.patch
-ApplyPatch mm-introduce-khugepaged.patch
-ApplyPatch mm-hugepage-redhat-customization.patch
-ApplyPatch mm-remove-madvise-MADV_HUGEPAGE.patch
-ApplyPatch uv-PCI-update-pci_set_vga_state-to-call-arch-functions.patch
-ApplyPatch pci-update-pci_set_vga_state-to-call-arch-functions.patch
-ApplyPatch uv-x86_64-update-uv-arch-to-target-legacy-VGA-I-O-correctly.patch
-ApplyPatch gpu-vgaarb-fix-vga-arbiter-to-accept-PCI-domains-other-than-0.patch
-ApplyPatch uv-vgaarb-add-user-selectability-of-the-number-of-gpus-in-a-system.patch
-ApplyPatch s390x-ctcm-lcs-claw-remove-cu3088-layer.patch
-ApplyPatch uv-x86-Fix-RTC-latency-bug-by-reading-replicated-cachelines.patch
-ApplyPatch pci-PCI-ACS-support-functions.patch
-ApplyPatch pci-Enablement-of-PCI-ACS-control-when-IOMMU-enabled-on-system.patch
-ApplyPatch net-do-not-check-CAP_NET_RAW-for-kernel-created-sockets.patch
-ApplyPatch fs-inotify-fix-inotify-WARN-and-compatibility-issues.patch
-ApplyPatch redhat-kABI-updates-02-11.patch
-ApplyPatch mm-fix-BUG-s-caused-by-the-transparent-hugepage-patch.patch
-ApplyPatch redhat-Allow-only-particular-kernel-rpms-to-be-built.patch
-ApplyPatch nfs-Fix-a-bug-in-nfs_fscache_release_page.patch
-ApplyPatch nfs-Remove-a-redundant-check-for-PageFsCache-in-nfs_migrate_page.patch
-ApplyPatch redhat-tagging-2-6-32-16-el6.patch
-ApplyPatch redhat-updating-lastcommit-for-2-6-32-16.patch
-ApplyPatch redhat-find-provides-also-require-python.patch
-ApplyPatch ppc-Add-kdump-support-to-Collaborative-Memory-Manager.patch
-ApplyPatch gfs-GFS2-problems-on-single-node-cluster.patch
-ApplyPatch selinux-print-the-module-name-when-SELinux-denies-a-userspace-upcall.patch
-ApplyPatch kernel-Prevent-futex-user-corruption-to-crash-the-kernel.patch
-ApplyPatch kvm-PIT-control-word-is-write-only.patch
-ApplyPatch virt-virtio_blk-add-block-topology-support.patch
-ApplyPatch redhat-make-CONFIG_CRASH-built-in.patch
-ApplyPatch mm-anon_vma-linking-changes-to-improve-multi-process-scalability.patch
-ApplyPatch mm-anon_vma-locking-updates-for-transparent-hugepage-code.patch
-ApplyPatch dm-stripe-avoid-divide-by-zero-with-invalid-stripe-count.patch
-ApplyPatch dm-log-userspace-fix-overhead_size-calcuations.patch
-ApplyPatch dm-mpath-fix-stall-when-requeueing-io.patch
-ApplyPatch dm-raid1-fail-writes-if-errors-are-not-handled-and-log-fails.patch
-ApplyPatch kernel-time-Implement-logarithmic-time-accumalation.patch
-ApplyPatch kernel-time-Remove-xtime_cache.patch
-ApplyPatch watchdog-Add-support-for-iTCO-watchdog-on-Ibex-Peak-chipset.patch
-ApplyPatch block-fix-bio_add_page-for-non-trivial-merge_bvec_fn-case.patch
-ApplyPatch block-freeze_bdev-don-t-deactivate-successfully-frozen-MS_RDONLY-sb.patch
-ApplyPatch x86-nmi_watchdog-enable-by-default-on-RHEL-6.patch
-ApplyPatch x86-x86-32-clean-up-rwsem-inline-asm-statements.patch
-ApplyPatch x86-clean-up-rwsem-type-system.patch
-ApplyPatch x86-x86-64-support-native-xadd-rwsem-implementation.patch
-ApplyPatch x86-x86-64-rwsem-64-bit-xadd-rwsem-implementation.patch
-ApplyPatch x86-x86-64-rwsem-Avoid-store-forwarding-hazard-in-__downgrade_write.patch
-ApplyPatch nfs-mount-nfs-Unknown-error-526.patch
-ApplyPatch s390-zfcp-cancel-all-pending-work-for-a-to-be-removed-zfcp_port.patch
-ApplyPatch s390-zfcp-report-BSG-errors-in-correct-field.patch
-ApplyPatch s390-qdio-prevent-kernel-bug-message-in-interrupt-handler.patch
-ApplyPatch s390-qdio-continue-polling-for-buffer-state-ERROR.patch
-ApplyPatch s390-hvc_iucv-allocate-IUCV-send-receive-buffers-in-DMA-zone.patch
-ApplyPatch redhat-whitelists-intentional-kABI-Module-kabi-rebase-pre-beta1-for-VM-bits.patch
-ApplyPatch redhat-tagging-2-6-32-17-el6.patch
-ApplyPatch redhat-updating-lastcommit-for-2-6-32-17.patch
-ApplyPatch redhat-disable-GFS2-on-s390x.patch
-ApplyPatch redhat-disable-XFS-on-all-arches-except-x86_64.patch
-ApplyPatch redhat-disable-all-the-filesystems-we-aren-t-going-to-support-and-fix-ext3-4.patch
-ApplyPatch redhat-run-new-kernel-pkg-on-posttrans.patch
-ApplyPatch redhat-fix-typo-on-redhat-Makefile.patch
-ApplyPatch kvm-virtio-console-Allow-sending-variable-sized-buffers-to-host-efault-on-copy_from_user-err.patch
-ApplyPatch kvm-virtio-console-return-efault-for-fill_readbuf-if-copy_to_user-fails.patch
-ApplyPatch kvm-virtio-console-outbufs-are-no-longer-needed.patch
-ApplyPatch kvm-virtio-Initialize-vq-data-entries-to-NULL.patch
-ApplyPatch kvm-virtio-console-update-Red-Hat-copyright-for-2010.patch
-ApplyPatch kvm-virtio-console-Ensure-no-memleaks-in-case-of-unused-buffers.patch
-ApplyPatch kvm-virtio-console-Add-ability-to-remove-module.patch
-ApplyPatch kvm-virtio-console-Error-out-if-we-can-t-allocate-buffers-for-control-queue.patch
-ApplyPatch kvm-virtio-console-Fill-ports-entire-in_vq-with-buffers.patch
-ApplyPatch kvm-Add-MAINTAINERS-entry-for-virtio_console.patch
-ApplyPatch kvm-fix-large-packet-drops-on-kvm-hosts-with-ipv6.patch
-ApplyPatch scsi-megaraid_sas-fix-for-32bit-apps.patch
-ApplyPatch x86-AES-PCLMUL-Instruction-support-Add-PCLMULQDQ-accelerated-implementation.patch
-ApplyPatch x86-AES-PCLMUL-Instruction-support-Various-small-fixes-for-AES-PCMLMUL-and-generate-byte-code-for-some-new-instructions-via-gas-macro.patch
-ApplyPatch x86-AES-PCLMUL-Instruction-support-Use-gas-macro-for-AES-NI-instructions.patch
-ApplyPatch x86-AES-PCLMUL-Instruction-support-Various-fixes-for-AES-NI-and-PCLMMUL.patch
-ApplyPatch kvm-x86-emulator-Add-push-pop-sreg-instructions.patch
-ApplyPatch kvm-x86-emulator-Introduce-No64-decode-option.patch
-ApplyPatch kvm-x86-emulator-Add-group8-instruction-decoding.patch
-ApplyPatch kvm-x86-emulator-Add-group9-instruction-decoding.patch
-ApplyPatch kvm-x86-emulator-Add-Virtual-8086-mode-of-emulation.patch
-ApplyPatch kvm-x86-emulator-fix-memory-access-during-x86-emulation.patch
-ApplyPatch kvm-x86-emulator-Check-IOPL-level-during-io-instruction-emulation.patch
-ApplyPatch kvm-x86-emulator-Fix-popf-emulation.patch
-ApplyPatch kvm-x86-emulator-Check-CPL-level-during-privilege-instruction-emulation.patch
-ApplyPatch kvm-x86-emulator-Add-LOCK-prefix-validity-checking.patch
-ApplyPatch kvm-x86-emulator-code-style-cleanup.patch
-ApplyPatch kvm-x86-emulator-Fix-properties-of-instructions-in-group-1_82.patch
-ApplyPatch kvm-inject-UD-in-64bit-mode-from-instruction-that-are-not-valid-there.patch
-ApplyPatch kvm-x86-emulator-X86EMUL-macro-replacements-from-do_fetch_insn_byte-to-x86_decode_insn.patch
-ApplyPatch kvm-x86-emulator-X86EMUL-macro-replacements-x86_emulate_insn-and-its-helpers.patch
-ApplyPatch kvm-x86-emulator-Fix-x86_emulate_insn-not-to-use-the-variable-rc-for-non-X86EMUL-values.patch
-ApplyPatch kvm-x86-emulator-Forbid-modifying-CS-segment-register-by-mov-instruction.patch
-ApplyPatch kvm-Fix-load_guest_segment_descriptor-to-inject-page-fault.patch
-ApplyPatch kvm-Fix-segment-descriptor-loading.patch
-ApplyPatch kvm-Fix-emulate_sys-call-enter-exit-s-fault-handling.patch
-ApplyPatch netdrv-ixgbe-prevent-speculative-processing-of-descriptors.patch
-ApplyPatch x86-nmi_watchdog-use-__cpuinit-for-nmi_watchdog_default.patch
-ApplyPatch net-netfilter-nf_conntrack-per-netns-nf_conntrack_cachep.patch
-ApplyPatch scsi-mpt2sas-fix-missing-initialization.patch
-ApplyPatch dm-raid45-target-constructor-error-path-oops-fix.patch
-ApplyPatch netdrv-cxgb3-add-memory-barriers.patch
-ApplyPatch mm-fix-anon_vma-locking-updates-for-transparent-hugepage-code.patch
-ApplyPatch mm-Fix-hugetlb-c-clear_huge_page-parameter.patch
-ApplyPatch gfs2-print-glock-numbers-in-hex.patch
-ApplyPatch selinux-netlabel-fix-corruption-of-SELinux-MLS-categories-127.patch
-ApplyPatch ata-ahci-disable-FPDMA-auto-activate-optimization-on-NVIDIA-AHCI.patch
-ApplyPatch scsi-lpfc-Update-from-8-3-5-4-to-8-3-5-5-FC-FCoE.patch
-ApplyPatch scsi-pmcraid-bug-fixes-from-upstream.patch
-ApplyPatch mm-Fix-potential-crash-with-sys_move_pages.patch
-ApplyPatch s390x-qeth-avoid-recovery-during-device-online-setting.patch
-ApplyPatch kernel-Fix-SMT-scheduler-regression-in-find_busiest_queue.patch
-ApplyPatch drm-bring-drm-core-ttm-fb-layer-fixes-in-from-upstream.patch
-ApplyPatch s390x-vdso-glibc-does-not-use-vdso-functions.patch
-ApplyPatch kernel-sched-Fix-SCHED_MC-regression-caused-by-change-in-sched-cpu_power.patch
-ApplyPatch dvb-Fix-endless-loop-when-decoding-ULE-at-dvb-core.patch
-ApplyPatch drm-radeon-kms-bring-all-v2-6-33-fixes-into-EL6-kernel.patch
-ApplyPatch redhat-Change-RPM-name-format-for-custom-builds.patch
-ApplyPatch uv-Have-mmu_notifiers-use-SRCU-so-they-may-safely-schedule.patch
-ApplyPatch uv-Fix-unmap_vma-bug-related-to-mmu_notifiers.patch
-ApplyPatch net-bug-fix-for-vlan-gro-issue.patch
-ApplyPatch redhat-add-suport-for-rhts-testing.patch
-ApplyPatch redhat-add-filesystem-test.patch
-ApplyPatch vhost-vhost-net-switch-to-smp-barriers.patch
-ApplyPatch vhost-logging-thinko-fix.patch
-ApplyPatch vhost-initialize-log-eventfd-context-pointer.patch
-ApplyPatch vhost-fix-get_user_pages_fast-error-handling.patch
-ApplyPatch vhost-vhost-net-restart-tx-poll-on-sk_sndbuf-full.patch
-ApplyPatch x86-Intel-Cougar-Point-chipset-support.patch
-ApplyPatch drm-Remove-loop-in-IronLake-graphics-interrupt-handler.patch
-ApplyPatch scsi-scsi_dh_emc-fix-mode-select-setup.patch
-ApplyPatch scsi-Add-netapp-to-scsi-dh-alua-dev-list.patch
-ApplyPatch virt-hvc_console-Fix-race-between-hvc_close-and-hvc_remove.patch
-ApplyPatch kernel-time-revert-cc2f92ad1d0e03fe527e8ccfc1f918c368964dc8.patch
-ApplyPatch redhat-infiniband-remove-all-infiniband-symbols-from-RHEL6-kABI.patch
-ApplyPatch redhat-kABI-Update-the-RHEL6-kABI-for-kernel-2-6-32-18-el6.patch
-ApplyPatch redhat-tagging-2-6-32-18-el6.patch
-ApplyPatch redhat-updating-lastcommit-for-2-6-32-18.patch
-ApplyPatch mm-Switch-to-SLAB.patch
-ApplyPatch redhat-kABI-Update-the-kABI-for-2-6-18-el6.patch
 
 ApplyOptionalPatch linux-kernel-test.patch
 
@@ -3504,6 +915,38 @@ done
 
 # get rid of unwanted files resulting from patch fuzz
 find . \( -name "*.orig" -o -name "*~" \) -exec rm -f {} \; >/dev/null
+
+%if %{signmodules}
+cp %{SOURCE19} .
+cat <<EOF
+###
+### Now generating a PGP key pair to be used for signing modules.
+###
+### If this takes a long time, you might wish to run rngd in the background to
+### keep the supply of entropy topped up.  It needs to be run as root, and
+### should use a hardware random number generator if one is available, eg:
+###
+###     rngd -r /dev/hwrandom
+###
+### If one isn't available, the pseudo-random number generator can be used:
+###
+###     rngd -r /dev/urandom
+###
+EOF
+gpg --homedir . --batch --gen-key %{SOURCE11}
+cat <<EOF
+###
+### Key pair generated.
+###
+EOF
+# if there're external keys to be included
+if [ -s %{SOURCE19} ]; then
+	gpg --homedir . --no-default-keyring --keyring kernel.pub --import %{SOURCE19}
+fi
+gpg --homedir . --export --keyring ./kernel.pub Red > extract.pub
+gcc -o scripts/bin2c scripts/bin2c.c
+scripts/bin2c ksign_def_public_key __initdata <extract.pub >crypto/signature/key.h
+%endif
 
 cd ..
 
@@ -3804,18 +1247,6 @@ mkdir -p $RPM_BUILD_ROOT/boot
 
 cd linux-%{kversion}.%{_target_cpu}
 
-%if %{signmodules}
-cp %{SOURCE19} .
-gpg --homedir . --batch --gen-key %{SOURCE11}
-# if there're external keys to be included
-if [ -s %{SOURCE19} ]; then
-	gpg --homedir . --no-default-keyring --keyring kernel.pub --import %{SOURCE19}
-fi
-gpg --homedir . --export --keyring ./kernel.pub Red > extract.pub
-gcc -o scripts/bin2c scripts/bin2c.c
-scripts/bin2c ksign_def_public_key __initdata <extract.pub >crypto/signature/key.h
-%endif
-
 %if %{with_debug}
 BuildKernel %make_target %kernel_image debug
 %endif
@@ -3842,10 +1273,6 @@ BuildKernel %make_target %kernel_image kdump
 %else
 BuildKernel vmlinux vmlinux kdump vmlinux
 %endif
-%endif
-
-%if %{with_framepointer}
-BuildKernel %make_target %kernel_image framepointer
 %endif
 
 %if %{with_doc}
@@ -3931,6 +1358,8 @@ popd
 mkdir -p $RPM_BUILD_ROOT/usr/sbin/
 cp $RPM_SOURCE_DIR/perf $RPM_BUILD_ROOT/usr/sbin/perf
 chmod 0755 $RPM_BUILD_ROOT/usr/sbin/perf
+cp $RPM_SOURCE_DIR/perf-archive $RPM_BUILD_ROOT/usr/sbin/perf-archive
+chmod 0755 $RPM_BUILD_ROOT/usr/sbin/perf-archive
 mkdir -p $RPM_BUILD_ROOT%{_datadir}/doc/perf
 %endif
 
@@ -4001,15 +1430,28 @@ fi\
 #	%%kernel_variant_posttrans [<subpackage>]
 # More text can follow to go at the end of this variant's %%post.
 #
+# grubby might be called during installation when a boot loader configuration
+# file is not present, so just drop any error messages. See BZ#610813 for
+# more details.
 %define kernel_variant_posttrans() \
 %{expand:%%posttrans %{?1}}\
 %{expand:\
+NEWKERNARGS=""\
+(/sbin/grubby --info=`/sbin/grubby --default-kernel`) 2>/dev/null | grep -q crashkernel\
+if [ $? -ne 0 ]\
+then\
+	NEWKERNARGS="--kernel-args=\"crashkernel=auto\""\
+fi\
 %if %{with_dracut}\
-/sbin/new-kernel-pkg --package kernel%{?1:-%{1}} --mkinitrd --dracut --depmod --install %{KVERREL}%{?1:.%{1}} --kernel-args="crashkernel=auto" || exit $?\
+/sbin/new-kernel-pkg --package kernel%{?1:-%{1}} --mkinitrd --dracut --depmod --update %{KVERREL}%{?1:.%{1}} $NEWKERNARGS || exit $?\
 %else\
-/sbin/new-kernel-pkg --package kernel%{?1:-%{1}} --mkinitrd --depmod --install %{KVERREL}%{?1:.%{1}} --kernel-args="crashkernel=auto" || exit $?\
+/sbin/new-kernel-pkg --package kernel%{?1:-%{1}} --mkinitrd --depmod --update %{KVERREL}%{?1:.%{1}} $NEWKERNARGS || exit $?\
 %endif}\
 /sbin/new-kernel-pkg --package kernel%{?1:-%{1}} --rpmposttrans %{KVERREL}%{?1:.%{1}} || exit $?\
+if [ -x /sbin/weak-modules ]\
+then\
+    /sbin/weak-modules --add-kernel %{KVERREL}%{?1:.%{1}} || exit $?\
+fi\
 %{nil}
 
 #
@@ -4026,10 +1468,9 @@ if [ `uname -i` == "x86_64" -o `uname -i` == "i386" ] &&\
    [ -f /etc/sysconfig/kernel ]; then\
   /bin/sed -r -i -e 's/^DEFAULTKERNEL=%{-r*}$/DEFAULTKERNEL=kernel%{?-v:-%{-v*}}/' /etc/sysconfig/kernel || exit $?\
 fi}\
-if [ -x /sbin/weak-modules ]\
-then\
-    /sbin/weak-modules --add-kernel %{KVERREL}%{?-v:.%{-v*}} || exit $?\
-fi\
+%{expand:\
+/sbin/new-kernel-pkg --package kernel%{?-v:-%{-v*}} --install %{KVERREL}%{?-v:.%{-v*}} || exit $?\
+}\
 %{nil}
 
 #
@@ -4063,11 +1504,6 @@ fi\
 
 %kernel_variant_post -v PAEdebug -r (kernel|kernel-smp|kernel-xen)
 %kernel_variant_preun PAEdebug
-
-%if %{with_framepointer}
-%kernel_variant_preun framepointer
-%kernel_variant_post -v framepointer
-%endif
 
 %ifarch s390x
 %postun kdump
@@ -4132,6 +1568,7 @@ fi
 %defattr(-,root,root)
 %{_datadir}/doc/perf
 /usr/sbin/perf
+/usr/sbin/perf-archive
 %{_datadir}/man/man1/*
 %endif
 
@@ -4179,7 +1616,6 @@ fi
 %{expand:%%files %{?2:%{2}-}devel}\
 %defattr(-,root,root)\
 %dir /usr/src/kernels\
-%verify(not mtime) /usr/src/kernels/%{KVERREL}%{?2:.%{2}}\
 /usr/src/kernels/%{KVERREL}%{?2:.%{2}}\
 %if %{with_debuginfo}\
 %ifnarch noarch\
@@ -4214,9 +1650,2558 @@ fi
 %else
 %kernel_variant_files -k vmlinux %{with_kdump} kdump
 %endif
-%kernel_variant_files %{with_framepointer} framepointer
 
 %changelog
+* Wed Oct 27 2010 Frantisek Hrbata <fhrbata@redhat.com> [2.6.32-71.7.1.el6]
+- [drm] ttm: fix regression introduced in dfb4a4250168008c5ac61e90ab2b86f074a83a6c (Dave Airlie) [646994 644896]
+
+* Wed Oct 20 2010 Frantisek Hrbata <fhrbata@redhat.com> [2.6.32-71.6.1.el6]
+- [block] fix a potential oops for callers of elevator_change (Jeff Moyer) [644926 641408]
+
+* Tue Oct 19 2010 Frantisek Hrbata <fhrbata@redhat.com> [2.6.32-71.5.1.el6]
+- [security] IMA: require command line option to enabled (Eric Paris) [644636 643667]
+- [net] Fix priv escalation in rds protocol (Neil Horman) [642899 642900] {CVE-2010-3904}
+- [v4l] Remove compat code for VIDIOCSMICROCODE (Mauro Carvalho Chehab) [642472 642473] {CVE-2010-2963}
+- [kernel] tracing: do not allow llseek to set_ftrace_filter (Jiri Olsa) [631625 631626] {CVE-2010-3079}
+- [virt] xen: hold mm->page_table_lock in vmalloc_sync (Andrew Jones) [644038 643371]
+- [fs] xfs: properly account for reclaimed inodes (Dave Chinner) [642680 641764]
+- [drm] fix ioctls infoleak (Danny Feng) [626319 621437] {CVE-2010-2803}
+- [netdrv] wireless extensions: fix kernel heap content leak (John Linville) [628437 628438] {CVE-2010-2955}
+- [netdrv] niu: buffer overflow for ETHTOOL_GRXCLSRLALL (Danny Feng) [632071 632072] {CVE-2010-3084}
+- [mm] add debug checks for mapcount related invariants (Andrea Arcangeli) [642679 622327 644037 642570]
+- [mm] move VM_BUG_ON inside the page_table_lock of zap_huge_pmd (Andrea Arcangeli) [642679 622327 644037 642570]
+- [mm] compaction: handle active and inactive fairly in too_many_isolated (Andrea Arcangeli) [642679 622327 644037 642570]
+- [mm] start_khugepaged after setting transparent_hugepage_flags (Andrea Arcangeli) [642679 622327 644037 642570]
+- [mm] fix hibernate memory corruption (Andrea Arcangeli) [644037 642570]
+- [mm] ksmd wait_event_freezable (Andrea Arcangeli) [642679 622327 644037 642570]
+- [mm] khugepaged wait_event_freezable (Andrea Arcangeli) [642679 622327 644037 642570]
+- [mm] unlink_anon_vmas in __split_vma in case of error (Andrea Arcangeli) [642679 622327 644037 642570]
+- [mm] fix memleak in copy_huge_pmd (Andrea Arcangeli) [642679 622327 644037 642570]
+- [mm] fix hang on anon_vma->root->lock (Andrea Arcangeli) [642679 622327 644037 642570]
+- [mm] avoid breaking huge pmd invariants in case of vma_adjust failures (Andrea Arcangeli) [642679 622327 644037 642570]
+
+* Tue Oct 12 2010 Frantisek Hrbata <fhrbata@redhat.com> [2.6.32-71.4.1.el6]
+- [scsi] fcoe: set default FIP mode as FIP_MODE_FABRIC (Mike Christie) [641457 636233]
+- [virt] KVM: Fix fs/gs reload oops with invalid ldt (Avi Kivity) [639884 639885] {CVE-2010-3698}
+- [drm] i915: prevent arbitrary kernel memory write (Jerome Marchand) [637690 637691] {CVE-2010-2962}
+- [scsi] libfc: adds flogi retry in case DID is zero in RJT (Mike Christie) [641456 633907]
+- [kernel] prevent heap corruption in snd_ctl_new() (Jerome Marchand) [638485 638486] {CVE-2010-3442}
+- [scsi] lpfc: lpfc driver oops during rhel6 installation with snapshot 12/13 and emulex FC (Rob Evers) [641907 634703]
+- [fs] ext4: Always journal quota file modifications (Eric Sandeen) [641454 624909]
+- [mm] fix split_huge_page error like mapcount 3 page_mapcount 2 (Andrea Arcangeli) [641258 640611]
+- [block] Fix pktcdvd ioctl dev_minor range check (Jerome Marchand) [638088 638089] {CVE-2010-3437}
+- [drm] ttm: Fix two race conditions + fix busy codepaths (Dave Airlie) [642045 640871]
+- [drm] Prune GEM vma entries (Dave Airlie) [642043 640870]
+- [virt] ksm: fix bad user data when swapping (Andrea Arcangeli) [641459 640579]
+- [virt] ksm: fix page_address_in_vma anon_vma oops (Andrea Arcangeli) [641460 640576]
+- [net] sctp: Fix out-of-bounds reading in sctp_asoc_get_hmac() (Jiri Pirko) [640461 640462] {CVE-2010-3705}
+- [mm] Move vma_stack_continue into mm.h (Mike Snitzer) [641483 638525]
+- [net] sctp: Do not reset the packet during sctp_packet_config() (Jiri Pirko) [637681 637682] {CVE-2010-3432}
+- [mm] vmstat incorrectly reports disk IO as swap in (Steve Best) [641458 636978]
+- [scsi] fcoe: Fix NPIV (Neil Horman) [641455 631246]
+
+* Sun Oct 3 2010 Frantisek Hrbata <fhrbata@redhat.com> [2.6.32-71.3.1.el6]
+- [block] prevent merges of discard and write requests (Mike Snitzer) [639412 637805]
+- [drm] nouveau: correct INIT_DP_CONDITION subcondition 5 (Ben Skeggs) [638973 636678]
+- [drm] nouveau: enable enhanced framing only if DP display supports it (Ben Skeggs) [638973 636678]
+- [drm] nouveau: fix required mode bandwidth calculation for DP (Ben Skeggs) [638973 636678]
+- [drm] nouveau: disable hotplug detect around DP link training (Ben Skeggs) [638973 636678]
+- [drm] nouveau: set DP display power state during DPMS (Ben Skeggs) [638973 636678]
+- [mm] remove "madvise" from possible /sys/kernel/mm/redhat_transparent_hugepage/enabled options (Larry Woodman) [636116 634500]
+- [netdrv] cxgb3: don't flush the workqueue if we are called from the workqueue (Doug Ledford) [634973 631547]
+- [netdrv] cxgb3: deal with fatal parity error status in interrupt handler (Doug Ledford) [634973 631547]
+- [netdrv] cxgb3: now that we define fatal parity errors, make sure they are cleared (Doug Ledford) [634973 631547]
+- [netdrv] cxgb3: Add define for fatal parity error bit manipulation (Doug Ledford) [634973 631547]
+- [virt] Emulate MSR_EBC_FREQUENCY_ID (Jes Sorensen) [633966 629836]
+- [virt] Define MSR_EBC_FREQUENCY_ID (Jes Sorensen) [633966 629836]
+- [kernel] initramfs: Fix initramfs size calculation (Hendrik Brueckner) [637087 626956]
+- [kernel] initramfs: Generalize initramfs_data.xxx.S variants (Hendrik Brueckner) [637087 626956]
+- [drm] radeon/kms: fix sideport detection on newer rs880 boards (Dave Airlie) [634984 626454]
+- [block] switch s390 tape_block and mg_disk to elevator_change() (Mike Snitzer) [633864 632631]
+- [block] add function call to switch the IO scheduler from a driver (Mike Snitzer) [633864 632631]
+
+* Wed Sep 22 2010 Frantisek Hrbata <fhrbata@redhat.com> [2.6.32-71.2.1.el6]
+- [misc] make compat_alloc_user_space() incorporate the access_ok() (Xiaotian Feng) [634465 634466] {CVE-2010-3081}
+- [x86] kernel: fix IA32 System Call Entry Point Vulnerability (Xiaotian Feng) [634451 634452] {CVE-2010-3301}
+
+* Thu Sep 16 2010 Frantisek Hrbata <fhrbata@redhat.com> [2.6.32-71.1.1.el6]
+- [security] Make kernel panic in FIPS mode if modsign check fails (David Howells) [633865 625914]
+- [virt] Guests on AMD with CPU type 6 and model >= 8 trigger errata read of MSR_K7_CLK_CTL (Jes Sorensen) [632292 629066]
+- [x86] UV: use virtual efi on SGI systems (George Beshers) [633964 627653]
+
+* Wed Sep 01 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-71.el6]
+- [fs] nfsd: initialize nfsd versions before creating svc (J. Bruce Fields) [628084]
+- [fs] nfsd: fix startup/shutdown order bug (J. Bruce Fields) [628084]
+- [security] KEYS: Fix bug in keyctl_session_to_parent() if parent has no session keyring (David Howells) [627808] {CVE-2010-2960}
+- [security] KEYS: Fix RCU no-lock warning in keyctl_session_to_parent() (David Howells) [627808] {CVE-2010-2960}
+
+* Wed Aug 25 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-70.el6]
+- [x86] Disable AMD IOMMU by default (Matthew Garrett) [593787]
+- [netdrv] Revert "iwlwifi: disable hardware scanning by default" (Stanislaw Gruszka) [625981]
+- [s390x] kernel: fix tlb flushing vs. concurrent /proc accesses (Hendrik Brueckner) [587587]
+- [s390x] kernel: prepare mm_context_t for new tlb flush handling (Hendrik Brueckner) [587587]
+- [fs] NFS: Fix an Oops in the NFSv4 atomic open code (Jeff Layton) [625718]
+- [net] can: add limit for nframes and clean up signed/unsigned variables (Danny Feng) [625702] {CVE-2010-2959}
+- [fs] aio: bump i_count instead of using igrab (Jeff Moyer) [626595]
+- [fs] cifs: check for NULL session password (Jeff Layton) [625583]
+- [fs] cifs: fix NULL pointer dereference in cifs_find_smb_ses (Jeff Layton) [625583]
+
+* Tue Aug 24 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-69.el6]
+- [mm] make stack guard page logic use vm_prev pointer (Mike Snitzer) [607859]
+- [mm] make the mlock() stack guard page checks stricter (Mike Snitzer) [607859]
+- [mm] make the vma list be doubly linked (Mike Snitzer) [607859]
+- [drm] nv50: insert a delay before fb change to prevent display engine hang (Ben Skeggs) [618225]
+- [mm] fix up some user-visible effects of the stack guard page (Mike Snitzer) [607859]
+- [net] sched: fix some kernel memory leaks (Jiri Pirko) [624637] {CVE-2010-2942}
+
+* Mon Aug 23 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-68.el6]
+- [virt] xen pvhvm: don't start xenbus w/out pvhvm (Andrew Jones) [624665]
+- [virt] xen pvhvm: don't unplug emulated devs w/out pvhvm (Andrew Jones) [625460]
+- [virt] xen pvhvm: export xen_pv_hvm_enable (Andrew Jones) [625460]
+- [fs] ext4: fix one more tracing oops (Eric Sandeen) [619013]
+- [drm] Provide for HDMI output on NVIDIA GPUs (John Feeney) [619877]
+- [netdrv] iwlwifi: disable aspm by default (John Linville) [611075]
+- [x86] acpi: Update battery information on notification 0x81 (Matthew Garrett) [606388]
+
+* Fri Aug 20 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-67.el6]
+- [x86] acpi: Update battery information on notification 0x81 (Matthew Garrett) [606388]
+- [mm] fix up some user-visible effects of the stack guard page (Mike Snitzer) [607859]
+- [mm] fix page table unmap for stack guard page properly (Mike Snitzer) [607859]
+- [x86] don't send SIGBUS for kernel page faults (Mike Snitzer) [607859]
+- [mm] fix missing page table unmap for stack guard page failure case (Mike Snitzer) [607859]
+- [mm] keep a guard page below a grow-down stack segment (Mike Snitzer) [607859]
+- [fs] xfs: fix untrusted inode number lookup (Dave Chinner) [624860]
+- [kernel] init, sched: Fix race between init and kthreadd (Gleb Natapov) [624329]
+- [net] Fix IGMP3 report parsing (Aristeu Rozanski) [621431]
+
+* Tue Aug 17 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-66.el6]
+- [netdrv] be2net: maintain multicast packet count in driver (Ivan Vecera) [621287]
+- [scsi] hpsa: don't use doorbel reset (Tomas Henzl) [612486]
+- [x86] Fix the kdump kernel OOMs caused by passthrough mode setting (Bhavna Sarathy) [624059]
+- [acpi] Force "pci=noacpi" on HP xw9300 (Prarit Bhargava) [615276]
+- [mm] Revert mm-vmstat-Actively-update-vmstat-counters-in-low-memory-situations (Larry Woodman) [622328]
+- [x86] Run EFI in physical mode to enable kdump on EFI-booted system (Takao Indoh) [593111]
+- [fs] ext4: protect inode bitmap clearing w/ spinlock (Eric Sandeen) [623666]
+- [scsi] libfc: call fc_remote_port_chkready under the host lock (Mike Christie) [623786]
+- [x86] Ensure that we provide per-cpu ACPI support (Matthew Garrett) [623874]
+- [fs] ext4: consolidate in_range() definitions (Eric Sandeen) [621829]
+- [fs] ext4: fix NULL pointer dereference in tracing (Eric Sandeen) [619013]
+- [block] O_DIRECT: fix the splitting up of contiguous I/O (Jeff Moyer) [622504]
+
+* Mon Aug 16 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-65.el6]
+- [fs] ext4: fix discard failure detection (Eric Sandeen) [608731]
+- [x86] Avoid potential NULL dereference in pcc-cpufreq (Matthew Garrett) [623768]
+- [scsi] bfa: vport create/delete fix (Rob Evers) [619226]
+- [net] tcp: fix crash in tcp_xmit_retransmit_queue (Jerome Marchand) [618386]
+- [build] Skip depmod when installing to non-standard INSTALL_MOD_PATH (Jon Masters) [609170]
+- [sound] disable NVIDIA HDMI PCI device for Lenovo T410 (Jaroslav Kysela) [605742]
+- [scsi] increase flush timeout (Mike Christie) [605322]
+- [x86] local_irq_save/restore when issuing IPI in early bootup (Prarit Bhargava) [602823]
+
+* Fri Aug 13 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-64.el6]
+- [kernel] Revert "[kernel] sched: Fix a race between ttwu() and migrate_task()" (Matthew Garrett) [620883]
+- [fs] btrfs: fix checks in BTRFS_IOC_CLONE_RANGE (Eugene Teo) [617003] {CVE-2010-2537 CVE-2010-2538}
+- [kernel] Makefile.build: make KBUILD_SYMTYPES work again (Don Zickus) [617749]
+- [netdrv] iwlwifi: disable hardware scanning by default (Stanislaw Gruszka) [593566]
+- [scsi] Revert: qla2xxx: Propogate transport disrupted status for cable pull conditions for faster failover (Chad Dupuis) [622041]
+- [drm] radeon: Don't limit vram size to aperture size (Matthew Garrett) [622039]
+- [fs] xfs: don't walk AGs that can't hold inodes (Dave Chinner) [621044]
+- [mmc] add Ricoh e822 support (Stanislaw Gruszka) [619900]
+- [scsi] mvsas: fix hot plug handling and IO issues (David Milburn) [616178]
+- [dm] mpath: enable discard support (Mike Snitzer) [619196]
+- [block] update request stacking methods to support discards (Mike Snitzer) [619196]
+- [dm] stripe: enable discard support (Mike Snitzer) [619196]
+- [dm] stripe: optimize sector division (Mike Snitzer) [619196]
+- [dm] stripe: move sector translation to a function (Mike Snitzer) [619196]
+- [dm] error: return error for discards (Mike Snitzer) [619196]
+- [dm] delay: enable discard support (Mike Snitzer) [619196]
+- [dm] zero: silently drop discards (Mike Snitzer) [619196]
+- [dm] split discard requests on target boundaries (Mike Snitzer) [619196]
+- [dm] use dm_target_offset macro (Mike Snitzer) [619196]
+- [dm] factor out max_io_len_target_boundary (Mike Snitzer) [619196]
+- [dm] use common __issue_target_request for flush and discard support (Mike Snitzer) [619196]
+- [dm] rename map_info flush_request to target_request_nr (Mike Snitzer) [619196]
+- [dm] remove the DM_TARGET_SUPPORTS_DISCARDS feature flag (Mike Snitzer) [619196]
+- [dm] introduce num_discard_requests in dm_target structure (Mike Snitzer) [619196]
+
+* Tue Aug 10 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-63.el6]
+- [fs] ext4: protect io completion lists with locking (Eric Sandeen) [621660]
+- [trace] Packport new mm tracepoint Documentation to RHEL6 (Larry Woodman) [618305]
+- [virt] KVM: Trace exception injection (Gleb Natapov) [616427]
+- [s390x] qeth: Clear mac_bits field when switching between l2/l3 (Hendrik Brueckner) [621333]
+- [net] ethtool: Fix potential kernel buffer overflow in ETHTOOL_GRXCLSRLALL (Jiri Pirko) [608953] {CVE-2010-2478}
+- [infiniband] Update QLogic QIB InfiniBand driver to version OFED 1.5.2 (Jay Fenlason) [572401]
+- [fs] update RWA_MASK, READA and SWRITE to match the corresponding BIO_RW_ bits (Jeff Moyer) [621693]
+
+* Tue Aug 10 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-62.el6]
+- [drm] Revert matroxfb support for G200EV chip (Peter Bogdanovic) [604830]
+- [drm] i915: more DP/eDP backport fixes (Dave Airlie) [615058]
+- [drm] correctly update connector DPMS status in drm_fb_helper (Dave Airlie) [615058]
+- [x86] ACPI/PM: Move ACPI video resume to a PM notifier (Dave Airlie) [615058]
+- [virt] x86: preset lpj values when on VMware (Zachary Amsden) [617390]
+- [virt] Revert "vhost-net: utilize PUBLISH_USED_IDX feature" (Michael S. Tsirkin)
+- [virt] Revert "virtio: put last seen used index into ring itself" (Michael S. Tsirkin) [616503]
+- [virt] Revert "virtio: net: Remove net-specific advertising of PUBLISH_USED feature" (Michael S. Tsirkin) [616503]
+- [virt] vhost: max s/g to match qemu (Michael S. Tsirkin) [619002]
+- [kernel] sched: Fix set_cpu_active() in cpu_down() (Danny Feng) [620807]
+- [dm] separate device deletion from dm_put (Mike Snitzer) [619199]
+- [dm] prevent access to md being deleted (Mike Snitzer) [619199]
+- [dm] ioctl: release _hash_lock between devices in remove_all (Mike Snitzer) [619199]
+
+* Fri Aug 06 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-61.el6]
+- [netdrv] r8169: disable PCIe ASPM (Michal Schmidt) [619880]
+- [fusion] mptfusion: fix DMA boudary (Tomas Henzl) [618625]
+- [fusion] mptfusion: Bump version to 3.04.16 (Tomas Henzl) [618625]
+- [fusion] mptfusion: Added code for occationally SATA hotplug failure (Tomas Henzl) [618625]
+- [fusion] mptfusion: schedule_target_reset from all Reset context (Tomas Henzl) [618625]
+- [fusion] mptfusion: Added sanity to check B_T mapping for device before adding to OS (Tomas Henzl) [618625]
+- [fusion] mptfusion: Corrected declaration of device_missing_delay (Tomas Henzl) [618625]
+- [fusion] mptfusion: Set fw_events_off to 1 at driver load time (Tomas Henzl) [618625]
+- [net] s2io: fixing DBG_PRINT() macro (Danny Feng) [619097]
+- [trace] backport file writeback tracepoints from upstream to RHEL6 (Larry Woodman) [618305]
+- [virt] vhost: thread per device attached to owner cgroups (Alex Williamson) [615118]
+- [cgroups] fix API thinko (Alex Williamson) [615118]
+- [cgroup] Revert: "workqueue: API to create a workqueue in cgroup" (Alex Williamson) [615118]
+- [net] bonding: allow arp_ip_targets on separate vlans to use arp validation (Andy Gospodarek) [581657]
+- [x86] Revert "[x86] kernel performance optimization with CONFIG_DEBUG_RODATA" (Aristeu Rozanski)
+
+* Fri Aug 06 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-60.el6]
+- [security] selinux: convert the policy type_attr_map to flex_array (Eric Paris) [617255]
+- [net] bridge: Fix IGMPv3 report parsing (Herbert Xu) [621431]
+- [kernel] CRED: Fix get_task_cred() and task_state() to not resurrect dead credentials (Jiri Olsa) [620380]
+- [net] bonding: set device in RLB ARP packet handler (Andy Gospodarek) [619450]
+- [x86] Remove warning in p4-clockmod driver (Prarit Bhargava) [618415]
+- [trace] Back port upstream mm/vmscan.c tracepoints to RHEL6 (Larry Woodman) [618305]
+- [net] bridge: Fix skb leak when multicast parsing fails on TX (Jiri Pirko) [617505]
+- [x86] Retract nmi-stacktrace patch (George Beshers) [598586]
+- [fs] cifs: account for new creduid parameter in spnego upcall string (Jeff Layton) [618608]
+- [fs] cifs: add separate cred_uid field to sesInfo (Jeff Layton) [618608]
+- [fs] cifs: check kmalloc() result (Jeff Layton) [618608]
+- [fs] cifs: remove unused cifsUidInfo struct (Jeff Layton) [618608]
+- [fs] cifs: clean up cifs_find_smb_ses (Jeff Layton) [618608]
+- [fs] cifs: match secType when searching for existing tcp session (Jeff Layton) [618608]
+- [fs] cifs: move address comparison into separate function (Jeff Layton) [618608]
+- [fs] cifs: set the port in sockaddr in a more clearly defined fashion (Jeff Layton) [618608]
+- [fs] cifs: remove an potentially confusing, obsolete comment (Jeff Layton) [618608]
+- [fs] cifs: remove unused ip_address field in struct TCP_Server_Info (Jeff Layton) [618608]
+- [fs] cifs: have decode_negTokenInit set flags in server struct (Jeff Layton) [618608]
+- [fs] cifs: break negotiate protocol calls out of cifs_setup_session (Jeff Layton) [618608]
+- [fs] cifs: eliminate "first_time" parm to CIFS_SessSetup (Jeff Layton) [618608]
+- [fs] cifs: save the dialect chosen by server (Jeff Layton) [618608]
+- [fs] cifs: change && to || (Jeff Layton) [618608]
+- [fs] cifs: rename "extended_security" to "global_secflags" (Jeff Layton) [618608]
+- [fs] cifs: move tcon find/create into separate function (Jeff Layton) [618608]
+- [fs] cifs: move SMB session creation code into separate function (Jeff Layton) [618608]
+- [fs] cifs: track local_nls in volume info (Jeff Layton) [618608]
+- [drm] nouveau: support fetching LVDS EDID from ACPI (Ben Skeggs) [616860]
+- [drm] ACPI: Export EDID blocks to the kernel (Ben Skeggs) [616860]
+- [fs] Fix for stuck recovery issue in GFS2 (Steven Whitehouse) [590878]
+- [powerpc] fix unsupported hardware to only be power5 (Steve Best) [619501]
+- [scsi] megaraid: fix sas expander issue (Tomas Henzl) [607930]
+- [virt] Default Xen PV-HVM to off (Don Dutile) [618172]
+- [mm] Correctly assign the number of MIGRATE_RESERVE pageblocks (Andrea Arcangeli) [614427]
+- [fs] return EINVAL when thawing unfrozen filesystems (Eric Sandeen) [601324]
+- [fs] GFS2: Fix problem where try locks were trying too hard (Steven Whitehouse) [585299]
+- [scsi] bnx2i: Fix iscsi connection cleanup (Mike Christie) [616939]
+- [scsi] bfa: fix sysfs crash while reading error_frames stats (Rob Evers) [594882]
+- [fusion] Block Error handling for deleting devices or Device in DMD (Tomas Henzl) [615866]
+- [netdrv] tun: avoid BUG, dump packet on GSO errors (Herbert Xu) [616845]
+- [netdr] rt2500usb: Fix WEP Enterprise (Stanislaw Gruszka) [609721]
+- [kernel] cmdline disable real time scheduler (George Beshers) [607587]
+- [fs] ext4: re-inline ext4_rec_len_(to|from)_disk functions (Eric Sandeen) [522808]
+- [netdrv] be2net: include latest upstream fixes (Ivan Vecera) [617187]
+
+* Wed Aug 04 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-59.el6]
+- [virt] Revert "[virt] vhost: create a vhost thread per device" (Aristeu Rozanski) [615118]
+
+* Tue Aug 03 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-58.el6]
+- [scsi] Update lpfc version for 8.3.5.17 driver release (Rob Evers) [612235]
+- [scsi] Fix endian conversion for BlockGuard in IOCB response (Rob Evers) [612235]
+- [scsi] Fixed a driver discovery issue where driver was unable to discover a target after Eveready back link bounce test (Rob Evers) [612235]
+- [scsi] Update lpfc version for 8.3.5.16 driver release (Rob Evers) [612235]
+- [scsi] Fixed BlockGuard endian conversion problem for supporting PowerPC EEH (Rob Evers) [612235]
+- [scsi] Fixed VLAN ID 0xFFF set to reg_fcfi mailbox command on FCF empty FCF VLAN bitmap (Rob Evers) [612235]
+- [scsi] Update lpfc version for 8.3.5.15 driver release (Rob Evers) [612235]
+- [scsi] Fixed a race condition causing FLOGI issued from dual processes (Rob Evers) [612235]
+- [scsi] Fix bug with ct response data not being sent with sli4 (Rob Evers) [612235]
+- [scsi] Fixed RoundRobin FCF failover due to mis-interpretation of kernel find_next_bit (Rob Evers) [612235]
+- [scsi] Enhanced round-robin FCF failover algorithm to re-start on new FCF async event (Rob Evers) [612235]
+- [scsi] Clear Ignore Reg Login Flag when purging mailbox queue (Rob Evers) [612235]
+- [scsi] Fix for ELS commands stuck on txq (Rob Evers) [612235]
+- [scsi] Fix bug with unsolicited CT event command not setting a flag (Rob Evers) [612235]
+- [drm] radeon/kms: fix possible mis-detection of sideport on rs690/rs740 (Jerome Glisse) [614583]
+- [scsi] fcoe: remove check for zero fabric name (Mike Christie) [614264]
+- [scsi] libfc: Add retry logic to lport state machine when receiving LS_RJT (Mike Christie) [614264]
+- [scsi] fcoe: fix offload feature flag change from netdev (Mike Christie) [614264]
+- [scsi] fcoe: adds src and dest mac address checking for fcoe frames (Mike Christie) [614264]
+- [scsi] fcoe: cleans up fcoe_disable and fcoe_enable (Mike Christie) [614264]
+- [scsi] lpfc Update from 8.3.5.13 to 8.3.5.14 FC/FCoE (Rob Evers) [603808]
+- [fusion] mptfusion: release resources in error return path (Tomas Henzl) [618560]
+- [scsi] IO error on SuperTrak EX4650 (Muuhh IKEDA) [593969]
+- [virt] vhost: create a vhost thread per device (Michael S. Tsirkin) [615118]
+- [kernel] workqueue: API to create a workqueue in cgroup (Michael S. Tsirkin) [615118]
+- [cgroup] Add an API to attach a task to current task's cgroup (Michael S. Tsirkin) [615118]
+
+* Tue Aug 03 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-57.el6]
+- [mm] avoid stalling allocations by introducing watermark_wait (Rik van Riel) [589604]
+- [mm] scale nr_rotated to balance memory pressure (Rik van Riel) [619384]
+- [mm] fix anon memory statistics with transparent hugepages (Rik van Riel) [619384]
+- [pci] avoid compiler warning in quirks.c (Alex Williamson) [619525]
+- [pci] Fix build if quirks are not enabled (Alex Williamson) [619525]
+- [pci] add Intel 82599 Virtual Function specific reset method (Alex Williamson) [619525]
+- [pci] add Intel USB specific reset method (Alex Williamson) [619525]
+- [pci] support device-specific reset methods (Alex Williamson) [619525]
+- [kernel] Documentation: Update memory-hotplug documentation (Steve Best) [612579]
+- [powerpc] Define memory_block_size_bytes() for ppc/pseries (Steve Best) [612579]
+- [kernel] Update the node sysfs code (Steve Best) [612579]
+- [kernel] Allow memory_block to span multiple memory sections (Steve Best) [612579]
+- [kernel] Add section count to memory_block (Steve Best) [612579]
+- [kernel] Add new phys_index properties (Steve Best) [612579]
+- [kernel] Move the find_memory_block() routine up (Steve Best) [612579]
+- [usb] xhci: rename driver to xhci_hcd (Don Zickus) [617217]
+- [usb] kabi placeholders for xhci (Don Zickus) [617217]
+- [fs] nfsd: minor nfsd_svc() cleanup (Jeff Layton) [599675]
+- [fs] nfsd: move more into nfsd_startup() (Jeff Layton) [599675]
+- [fs] nfsd: just keep single lockd reference for nfsd (Jeff Layton) [599675]
+- [fs] nfsd: clean up nfsd_create_serv error handling (Jeff Layton) [599675]
+- [fs] nfsd: fix error handling in __write_ports_addxprt (Jeff Layton) [599675]
+- [fs] nfsd: fix error handling when starting nfsd with rpcbind down (Jeff Layton) [599675]
+- [fs] nfsd4: fix v4 state shutdown error paths (Jeff Layton) [599675]
+- [mm] page allocator: Update free page counters after pages are placed on the free list (Andrea Arcangeli) [614427]
+- [mm] page allocator: Drain per-cpu lists after direct reclaim allocation fails (Andrea Arcangeli) [614427]
+- [mm] vmstat: Actively update vmstat counters in low memory situations (Andrea Arcangeli) [614427]
+- [kernel] mem-hotplug: fix potential race while building zonelist for new populated zone (John Villalovos) [581557]
+- [kernel] mem-hotplug: avoid multiple zones sharing same boot strapping boot_pageset (John Villalovos) [581557]
+- [kernel] cpu/mem hotplug: enable CPUs online before local memory online (John Villalovos) [581557]
+- [mm] remove khugepaged young bit check (Andrea Arcangeli) [615381]
+
+* Fri Jul 30 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-56.el6]
+- [fs] GFS2: Backup plan for "vmalloc is slow" (Steven Whitehouse) [619331]
+- [s390x] zfcp: Do not try "forced close" when port is already closed (Hendrik Brueckner) [612594]
+- [s390x] zfcp: Do not unblock rport from REOPEN_PORT_FORCED (Hendrik Brueckner) [612597]
+- [s390x] zfcp: Fix retry after failed "open port" erp action (Hendrik Brueckner) [612601]
+- [s390x] zfcp: Fail erp after timeout (Hendrik Brueckner) [612618]
+- [s390x] zfcp: Use forced_reopen in terminate_rport_io callback (Hendrik Brueckner) [612621]
+- [s390x] zfcp: Register SCSI devices after fc_remote_port_add (Hendrik Brueckner) [612586]
+- [scsi] sg: fix bio leak with a detached device (Matthew Garrett) [619103]
+- [powerpc] hash_huge_page: pte_insert failed (Steve Best) [618831]
+- [block] md: fix lock ordering problem (Doug Ledford) [616103]
+- [fs] sysfs: add attribute to indicate hw address assignment type (Stefan Assmann) [614786]
+- [infiniband] ehca: init irq tasklet before irq can happen (Steve Best) [617741]
+- [netdrv] iwlwifi: fix scan abort (Stanislaw Gruszka) [619686]
+- [powerpc] ONLINE to OFFLINE CPU state transition during removal (Steve Best) [619212]
+- [fs] ext4: fix potential NULL dereference while tracing (Eric Sandeen) [619013]
+- [infiniband] ehca: Catch failing ioremap() (Steve Best) [617747]
+- [netdrv] Add missing read memory barrier to Intel Ethernet device (Steve Best) [617279]
+- [netdrv] igb: Fix Tx hangs seen when loading igb with max_vfs > 7 (Stefan Assmann) [617214]
+- [pci] Revert "[pci] update bridge resources to get more big ranges in PCI assign unssigned" (Shyam Iyer) [617007]
+- [netdrv] cnic: Fix context memory init on 5709 (Stanislaw Gruszka) [616952]
+- [virt] vmxnet3: fix network connectivity issues (Andy Gospodarek) [616252]
+- [drm] i915: eDP/DP fixes from upstream (Dave Airlie) [615058]
+- [ata] ata_piix: fix locking around SIDPR access (David Milburn) [608542]
+- [md] Fix md raid partition detection update (Doug Ledford) [607477]
+- [netdrv] e1000e: 82577/82578 PHY register access issues (Andy Gospodarek) [592480]
+- [s390x] Remove PSF order/suborder check for dasd ioctl (John Feeney) [566183]
+- [x86] kernel performance optimization with CONFIG_DEBUG_RODATA (Danny Feng) [557364]
+- [netdrv] Revert "[Fedora] [e1000] add quirk for ich9" (Andy Gospodarek) [613196]
+- [block] cfq: always return false from should_idle if slice_idle is set to zero (Jeff Moyer) [616904]
+- [block] cfq/jbd: Fix fsync performance for small files (Jeff Moyer) [578515]
+
+* Thu Jul 29 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-55.el6]
+- [kernel] Add -Werror and WAR for bogus array bounds warnings (Prarit Bhargava) [603733]
+- [pci] Remove pci_bus_dump_resources() (Prarit Bhargava) [613972]
+- [fs] CIFS: Compile fix for malicious redirect fix (David Howells) [612136] {CVE-2010-2524}
+
+* Tue Jul 27 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-54.el6]
+- [block] Disable async multicore raid xor function (Doug Ledford) [596490]
+- [kernel] taint: Add mark_hardware_unsupported() (Prarit Bhargava) [600509]
+- [kernel] panic: Allow warnings to set different taint flags (Prarit Bhargava) [600509]
+- [kernel] taint: Add taint padding and TAINT_HARDWARE_UNSUPPORTED (Prarit Bhargava) [600509]
+- [mm] disable transparent hugepages by default on small systems (Rik van Riel) [618444]
+- [net] Kernel lockups with bonding and IPV6 (Shyam Iyer) [614240]
+- [x86] ACPI: Improve C3 residency (Matthew Garrett) [583792]
+- [x86] cpufreq: pcc driver should check for pcch method before calling _OSC (Matthew Garrett) [616908]
+- [x86] Add PCC Cpufreq driver (Matthew Garrett) [465354]
+- [x86] Disable IOMMU graphics on Cantiga chipset (John Villalovos) [602207]
+- [fs] vfsmount: pad for future fanotify support (Eric Paris) [320631]
+- [ipmi] Run a dummy command before submitting a new command (Matthew Garrett) [616089]
+- [block] mmc: Avoid hangs with mounted SD cards (Matthew Garrett) [615318]
+- [md] Fix md raid partition detection (Doug Ledford) [607477]
+- [ipmi] Make sure drivers were registered before unregistering them (Matthew Garrett) [601376]
+- [s390x] Enhanced qeth for new network device type support (Hendrik Brueckner) [599650]
+- [fs] cifs: fix security issue with dns_resolver upcall (David Howells) [612136] {CVE-2010-2524}
+
+* Mon Jul 26 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-53.el6]
+- [fs] xfs: track AGs with reclaimable inodes in per-ag radix tree (Dave Chinner) [617035]
+- [fs] xfs: convert inode shrinker to per-filesystem contexts (Dave Chinner) [617035]
+- [mm] add context argument to shrinker callback (Dave Chinner) [617035]
+- [netdrv] enic: bug fix: make the set/get netlink VF_PORT support symmetrical (Andy Gospodarek) [609635]
+- [netdrv] enic: Use random mac addr when associating port-profile (Andy Gospodarek) [609635]
+- [netdrv] enic: bug fix: sprintf UUID to string as u8 rather than u16 array (Andy Gospodarek) [609635]
+- [net] netlink: bug fix: don't overrun skbs on vf_port dump (Andy Gospodarek) [609635]
+- [netdrv] enic: Bug Fix: Handle surprise hardware removals (Andy Gospodarek) [609635]
+- [netdrv] enic: Bug Fix: Change hardware ingress vlan rewrite mode (Andy Gospodarek) [609635]
+- [drm] nouveau: cleanup connector/encoder creation (Ben Skeggs) [612402]
+- [drm] nouveau: move LVDS detection back to connector detect() time (Ben Skeggs) [612402]
+- [net] add missing header needed for sunrpc tracepoints (Steve Dickson) [567741]
+- [drm] nouveau: fix race condition when under memory pressure (Ben Skeggs) [602663]
+- [tty] fix tty->pgrp races (Jiri Olsa) [586022] {CVE-2009-4895}
+- [scsi] Log msg when getting Unit Attention (Mike Christie) [585432]
+- [scsi] be2iscsi: Fix for 64K data (Mike Christie) [608795]
+- [cgroups] Fix device cgroup not allowing access to a partition (Vivek Goyal) [589662]
+- [audit] fix for audit misreporting return code on amd64 if we had to reschedule (Alexander Viro) [604993]
+- [x86] Fix ioremap() so will boot on IA-32 system with PAE (John Feeney) [607029]
+- [netdrv] macvtap: Limit packet queue length (Herbert Xu) [614119]
+- [virt] vhost: avoid pr_err on condition guest can trigger (Michael S. Tsirkin) [607177]
+- [mm] ksmd and khugepaged freezing (Andrea Arcangeli) [617430]
+- [pci] Allow read/write access to sysfs I/O port resources (Alex Williamson) [616174]
+- [netdrv] improve ipv6 pkt throughput with TSO (John Feeney) [613770]
+- [netdrv] ixgbe: use GFP_ATOMIC when allocating FCoE DDP context from the dma pool (Andy Gospodarek) [614243]
+- [netdrv] ixgbe: properly toggling netdev feature flags when disabling FCoE (Andy Gospodarek) [614243]
+- [scsi] fcoe: remove vlan ID from WWPN (Neil Horman) [611974]
+- [fs] xfs: fix corruption case for block size < page size (Dave Chinner) [581432]
+- [fs] xfs: unregister inode shrinker before freeing filesystem structures (Dave Chinner) [607750]
+- [drm] i915: add 'reclaimable' to i915 self-reclaimable page allocations (Dave Airlie) [616614]
+- [drm] i915: fix 945GM stability issues on Lenovo T60 laptops (Dave Airlie) [568780]
+- [security] SELinux: check OPEN on truncate calls (Eric Paris) [578841]
+- [fs] ext4: Fix buffer dirtying in data=journal mode (Eric Sandeen) [602251]
+- [fs] ext3: Fix buffer dirtying in data=journal mode (Eric Sandeen) [602251]
+
+* Tue Jul 20 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-52.el6]
+- [virt] Call mask notifiers from pic (Gleb Natapov) [608613]
+- [virt] Convert mask notifiers to use irqchip/pin instead of gsi (Gleb Natapov) [608613]
+- [virt] Reenter guest after instruction emulation failure if emulation was due to access to non-mmio address (Gleb Natapov) [608595]
+- [virt] Return EFAULT from kvm ioctl when guest access bad area (Gleb Natapov) [608595]
+- [drm] nouveau: fix dual-link displays when plugged into single-link outputs (Ben Skeggs) [615154]
+- [drm] nv50: obey dcb->duallink_possible (Ben Skeggs) [615154]
+- [drm] nv50: fix duallink_possible calculation for DCB 4.0 cards (Ben Skeggs) [615154]
+- [mm] Rename ramzswap to zram in documentation (Jerome Marchand) [578641]
+- [mm] Rename ramzswap to zram in code (Jerome Marchand) [578641]
+- [mm] Rename ramzswap files to zram (Jerome Marchand) [578641]
+- [mm] ramzswap: Support generic I_O requests (Jerome Marchand) [578641]
+- [mm] ramzswap: Handler for swap slot free callback (Jerome Marchand) [578641]
+- [mm] swap: Add swap slot free callback to block_device_operations (Jerome Marchand) [578641]
+- [mm] swapfile: Add flag to identify block swap devices (Jerome Marchand) [578641]
+- [mm] ramzswap: Remove backing swap support (Jerome Marchand) [578641]
+- [drm] i915: Output IRQ setup fixes (Adam Jackson) [591709]
+- [drm] nouveau: fix oops on chipsets that only have a single crtc (Ben Skeggs) [602290]
+- [drm] i915: fix oops on single crtc devices (Dave Airlie) [610002]
+- [drm] radeon: check/restore sanity before doing anything else with GPU (Dave Airlie) [612767]
+- [fs] jbd2: Fix I/O hang in jbd2_journal_release_jbd_inode (Steve Best) [607254]
+- [fs] GFS2: rename causes kernel Oops (Robert S Peterson) [614642]
+- [ipmi] Provide kipmid_max_busy_us parameter to cap CPU usage (Shyam Iyer) [609156]
+- [kernel] kprobes: "repz ret" causes bad EIP value crash (Dave Anderson) [607215]
+- [pci] panic on access to hot-removed device's proc fs (Don Zickus) [612024]
+- [pci] don't reassign to ROM res if it is not going to be enabled (Peter Bogdanovic) [612950]
+- [x86] i386: Update CPU & Memory Hot Add Not Supported messages (Prarit Bhargava) [600435]
+- [x86] nmi: limit hrtimer to lapic or ioapic mode (Don Zickus) [581722]
+- [virt] emulator: inc/dec can have lock prefix (Gleb Natapov) [615925]
+- [virt] Implement xen_panic_block notifier for RHEL6 Xen guests (Don Dutile) [614476]
+- [virt] KVM: MMU: fix conflict access permissions in direct sp (Avi Kivity) [607650]
+- [virt] vhost-net: avoid flush under lock (Michael S. Tsirkin) [612421]
+- [netdrv] bnx2x: Don't report link down if has been already down (Stanislaw Gruszka) [610311]
+- [netdrv] mac80211: improve error checking if WEP fails to init (John Linville) [608704]
+- [netdrv] ath9k: cleanup init error path (John Linville) [610224]
+- [mm] memcontrol: never oom when charging huge pages (Andrea Arcangeli) [608996]
+- [mm] memcontrol: prevent endless loop with huge pages and near-limit group (Andrea Arcangeli) [608996]
+- [virt] Xen PV-on-HVM: prevent null chip data ref ptr on newer xen hv (Don Dutile) [523134]
+- [virt] Xen PV-on-HVM: modularize platform-pci support (Don Dutile) [523134]
+- [virt] HPET: Do not disable hpet if not initialized (Don Dutile) [523134]
+- [virt] Xen PV-on-HVM: suspend-resume-support (Don Dutile) [523134]
+- [virt] Xen PV-on-HVM: refactor platform-pci, grant-table, enlighten support (Don Dutile) [523134 600360]
+- [virt] Xen PV-on-HVM: update evtchn delivery on HVM (Don Dutile) [523134]
+- [virt] Xen PV-on-HVM: update hvm_op hypercall & related h files to upstream (Don Dutile) [523134]
+
+* Tue Jul 20 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-51.el6]
+- [block] cciss: bump version 3626RH (Tomas Henzl) [609522]
+- [block] cciss: cleanup compiletime warnings (Tomas Henzl) [609522]
+- [block] cciss: do not reset 640x boards (Tomas Henzl) [609522]
+- [block] cciss: fix hard reset (Tomas Henzl) [609522]
+- [block] cciss: factor out reset devices code (Tomas Henzl) [609522]
+- [block] cciss: factor out cciss find cfg addrs (Tomas Henzl) [609522]
+- [block] cciss: factor out cciss wait for mode change ack (Tomas Henzl) [609522]
+- [block] cciss: factor out cciss disable dma prefetch on p600 (Tomas Henzl) [609522]
+- [block] cciss: factor out cciss enable scsi prefetch (Tomas Henzl) [609522]
+- [block] cciss: factor out CISS signature present (Tomas Henzl) [609522]
+- [block] cciss: factor out cciss find board params (Tomas Henzl) [609522]
+- [block] cciss: factor out cciss find cfgtables (Tomas Henzl) [609522]
+- [block] cciss: factor out cciss wait for board ready (Tomas Henzl) [609522]
+- [block] cciss: factor out cciss find memory BAR (Tomas Henzl) [609522]
+- [block] cciss: remove board-id param from cciss interrupt mode (Tomas Henzl) [609522]
+- [block] cciss: factor out cciss_board_disabled (Tomas Henzl) [609522]
+- [block] cciss: factor out cciss lookup board id (Tomas Henzl) [609522]
+- [block] cciss: save pdev early to avoid passing it around (Tomas Henzl) [609522]
+- [audit] dynamically allocate audit_names when not enough space is in the names array (Eric Paris) [586108]
+- [mm] mmu notifier index huge spte fix (Andrea Arcangeli) [606131]
+- [x86] Update x86 MCE code part 2 (Prarit Bhargava) [580587]
+- [kernel] execshield: respect disabled randomization (Roland McGrath) [605516]
+- [scsi] mpt2sas: Fix to use sas device list instead of enclosure list (Tomas Henzl) [599049]
+- [kernel] disable kmemleak by default for -debug kernels (Jason Baron) [612244]
+
+* Thu Jul 15 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-50.el6]
+- [net] CHECKSUM: header export and fixup (Michael S. Tsirkin) [605555]
+- [pci] iommu/intel: Disable IOMMU for graphics if BIOS is broken (Adam Jackson) [593516]
+- [fs] xfs: remove block number from inode lookup code (Jiri Pirko) [607031]
+- [fs] xfs: rename XFS_IGET_BULKSTAT to XFS_IGET_UNTRUSTED (Jiri Pirko) [607031]
+- [fs] xfs: validate untrusted inode numbers during lookup (Jiri Pirko) [607031]
+- [fs] xfs: always use iget in bulkstat (Jiri Pirko) [607031]
+- [igb] avoid platform reset and MCE with DCA (Stefan Assmann) [572732 606687]
+- [drm] nouveau: downgrade severity of most init table parser errors (Ben Skeggs) [596679]
+- [drm] nouveau: INIT_CONFIGURE_PREINIT/CLK/MEM on newer BIOSes is not an error (Ben Skeggs) [596679]
+- [netdrv] enic: Replace LRO with GRO (Andy Gospodarek) [609635]
+- [net] decreasing real_num_tx_queues needs to flush qdisc (Andy Gospodarek) [609260]
+- [net] sched: qdisc_reset_all_tx is calling qdisc_reset without qdisc_lock (Andy Gospodarek) [609260]
+- [fs] inotify: send IN_UNMOUNT events (Eric Paris) [580825]
+- [fs] inotify: fix inotify oneshot support (Eric Paris) [614595]
+- [s390x] zfcp: Zero memory for gpn_ft and adisc requests (Hendrik Brueckner) [609537]
+- [s390x] zfcp: Do not escalate scsi eh after fast_io_fail_tmo fired (Hendrik Brueckner) [606365]
+- [s390x] zfcp: Remove SCSI device during unit_remove (Hendrik Brueckner) [589278]
+- [scsi] Allow FC LLD to fast-fail scsi eh by introducing new eh return (Hendrik Brueckner) [606365]
+- [s390x] zfcp: Do not wait for SBALs on stopped queue (Hendrik Brueckner) [606359]
+- [x86] efi: Fill all reserved memmap entries if add_efi_memmap specified (George Beshers) [607386]
+
+* Wed Jul 14 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-49.el6]
+- [edac] i7core_edac: Avoid doing multiple probes for the same card (Mauro Carvalho Chehab) [604564]
+- [edac] i7core_edac: Properly discover the first QPI device (Mauro Carvalho Chehab) [604564]
+- [usb] Disable XHCI (USB 3) HCD module autoloading (Matthew Garrett) [608343]
+- [fs] xfs: prevent swapext from operating on write-only files (Jiri Pirko) [605162] {CVE-2010-2226}
+- [powerpc] Add symbols to kernel to allow makedumpfile to filter on ppc64 (Neil Horman) [611710]
+- [net] netfilter: add CHECKSUM target (Michael S. Tsirkin) [605555]
+- [security] audit: dynamically allocate audit_names when not enough space is in the names array (Eric Paris) [586108]
+- [pci] iommu/intel: Disable IOMMU for graphics if BIOS is broken (Adam Jackson) [593516]
+- [virt] stop vpit before irq_routing freed (Gleb Natapov) [612648]
+- [netdrv] Allow for BCM5709S to dump vmcore via NFS (John Feeney) [577809]
+- [netdrv] igb: drop support for UDP hashing w/ RSS (Stefan Assmann) [613782]
+- [netdrv] mac80211: remove wep dependency (John Linville) [608704]
+- [mm] fix swapin race conditions (Andrea Arcangeli) [606131]
+- [crypto] authenc: Add EINPROGRESS check (Stanislaw Gruszka) [604611]
+- [fs] inotify: don't leak user struct on inotify release (Stanislaw Gruszka) [592399 604611]
+- [x86] amd: Check X86_FEATURE_OSVW bit before accessing OSVW MSRs (Stanislaw Gruszka) [604611]
+- [kernel] profile: fix stats and data leakage (Stanislaw Gruszka) [604611]
+- [sound] ice1724: Fix ESI Maya44 capture source control (Stanislaw Gruszka) [604611]
+- [mm] hugetlbfs: kill applications that use MAP_NORESERVE with SIGBUS instead of OOM-killer (Stanislaw Gruszka) [604611]
+- [dma] dma-mapping: fix dma_sync_single_range_* (Stanislaw Gruszka) [604611]
+- [hwmon] hp_accel: fix race in device removal (Stanislaw Gruszka) [604611]
+- [net] ipv4: udp: fix short packet and bad checksum logging (Stanislaw Gruszka) [604611]
+
+* Tue Jul 13 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-48.el6]
+- [scsi] SCSI: Retry commands with UNIT_ATTENTION sense codes to fix ext3/ext4 I/O error (Stanislaw Gruszka) [604610]
+- [scsi] Enable retries for SYNCRONIZE_CACHE commands to fix I/O error (Stanislaw Gruszka) [604610]
+- [scsi] debug: virtual_gb ignores sector_size (Stanislaw Gruszka) [604610]
+- [x86] acpi power_meter: acpi_device_class "power_meter_resource" too long (Stanislaw Gruszka) [604610]
+- [v4l] budget: Oops: "BUG: unable to handle kernel NULL pointer dereference" (Stanislaw Gruszka) [604610]
+- [virt] virtio: initialize earlier (Stanislaw Gruszka) [604610]
+- [security] testing the wrong variable in create_by_name() (Stanislaw Gruszka) [604610]
+- [netdrv] r8169: more broken register writes workaround (Stanislaw Gruszka) [604610]
+- [netdrv] r8169: fix broken register writes (Stanislaw Gruszka) [604610]
+- [netdrv] r8169: use correct barrier between cacheable and non-cacheable memory (Stanislaw Gruszka) [604610]
+- [kernel] kgdb: don't needlessly skip PAGE_USER test for Fsl booke (Stanislaw Gruszka) [604610]
+- [kernel] initramfs: handle unrecognised decompressor when unpacking (Stanislaw Gruszka) [604610]
+- [sound] snd-meastro3: Ignore spurious HV interrupts during suspend / resume (Stanislaw Gruszka) [604610]
+- [sound] snd-meastro3: Add amp_gpio quirk for Compaq EVO N600C (Stanislaw Gruszka) [604610]
+- [x86] Disable large pages on CPUs with Atom erratum AAE44 (Stanislaw Gruszka) [604610]
+- [x86] x86-64: Clear a 64-bit FS/GS base on fork if selector is nonzero (Stanislaw Gruszka) [604610]
+- [edac] mce: Fix wrong mask and macro usage (Stanislaw Gruszka) [604610]
+- [netdrv] p54pci: fix bugs in p54p_check_tx_ring (Stanislaw Gruszka) [604610]
+- [netdrv] dm9601: fix phy/eeprom write routine (Stanislaw Gruszka) [604610]
+- [block] ensure jiffies wrap is handled correctly in blk_rq_timed_out_timer (Stanislaw Gruszka) [604610]
+- [serial] 8250_pnp: add Fujitsu Wacom device (Stanislaw Gruszka) [604610]
+- [block] raid6: fix recovery performance regression (Stanislaw Gruszka) [604610]
+- [fs] procfs: fix tid fdinfo (Stanislaw Gruszka) [604610]
+- [usb] xhci: properly set endpoint context fields for periodic eps (Stanislaw Gruszka) [604610]
+- [usb] xhci: properly set the "Mult" field of the endpoint context (Stanislaw Gruszka) [604610]
+- [usb] OHCI: don't look at the root hub to get the number of ports (Stanislaw Gruszka) [604610]
+- [usb] don't choose configs with no interfaces (Stanislaw Gruszka) [604610]
+- [usb] fix testing the wrong variable in fs_create_by_name() (Stanislaw Gruszka) [604610]
+- [usb] Add id for HP ev2210 a.k.a Sierra MC5725 miniPCI-e Cell Modem (Stanislaw Gruszka) [604610]
+- [usb] fix remote wakeup settings during system sleep (Stanislaw Gruszka) [604610]
+- [mm] hugetlb: fix infinite loop in get_futex_key() when backed by huge pages (Stanislaw Gruszka) [604610]
+- [kernel] flex_array: fix the panic when calling flex_array_alloc() without __GFP_ZERO (Stanislaw Gruszka) [604610]
+- [netdrv] mac80211: remove bogus TX agg state assignment (Stanislaw Gruszka) [604610]
+- [ata] libata: fix locking around blk_abort_request() (Stanislaw Gruszka) [604610]
+- [netdrv] p54usb: Add usbid for Corega CG-WLUSB2GT (Stanislaw Gruszka) [604610]
+- [usb] EHCI: defer reclamation of siTDs (Stanislaw Gruszka) [604610]
+- [drm] nouveau: initialise display before enabling interrupts (Ben Skeggs) [596703]
+- [drm] nv50: fix DP->DVI if output has been programmed for native DP previously (Ben Skeggs) [596703]
+- [block] dm ioctl: return uevent flag after rename (Mike Snitzer) [609591]
+- [block] dm ioctl: make __dev_status return void (Mike Snitzer) [609591]
+- [block] dm ioctl: remove __dev_status from geometry and target message (Mike Snitzer) [609591]
+- [infiniband] mlx4: enable IBoE feature (Doug Ledford) [529397]
+- [dm] dm-replicator: Fix replicator_ctr() error path (Heinz Mauelshagen) [612743]
+- [virt] vmware: disable NMI watchdog in guest (Don Zickus) [612321]
+- [virt] KVM: Expose MCE control MSRs to userspace (Avi Kivity) [558416]
+
+* Mon Jul 12 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-47.el6]
+- [x86] eeepc-laptop: disable cpu speed control on EeePC 701 (Stanislaw Gruszka) [604608]
+- [x86] gart: Disable GART explicitly before initialization (Stanislaw Gruszka) [604608]
+- [netdrv] r8169: clean up my printk uglyness (Stanislaw Gruszka) [604608]
+- [input] wacom: switch mode upon system resume (Stanislaw Gruszka) [604608]
+- [fs] eCryptfs: Decrypt symlink target for stat size (Stanislaw Gruszka) [604608]
+- [usb] cdc-acm: Update to new autopm API (Stanislaw Gruszka) [604608]
+- [netdrv] e1000e: stop cleaning when we reach tx_ring->next_to_use (Stanislaw Gruszka) [604608]
+- [kernel] sched: Fix a race between ttwu() and migrate_task() (Stanislaw Gruszka) [604608]
+- [fs] ecryptfs: fix error code for missing xattrs in lower fs (Stanislaw Gruszka) [604608]
+- [pci] fix nested spinlock hang in aer_inject (Stanislaw Gruszka) [604608]
+- [fs] ecryptfs: fix use with tmpfs by removing d_drop from ecryptfs_destroy_inode (Stanislaw Gruszka) [604608]
+- [scsi] add scsi target reset support to scsi ioctl (Stanislaw Gruszka) [604608]
+- [pci] PCIe AER: prevent AER injection if hardware masks error reporting (Stanislaw Gruszka) [604608]
+- [fs] quota: Fix possible dq_flags corruption (Stanislaw Gruszka) [604608]
+- [fs] fix NFS4 handling of mountpoint stat (Stanislaw Gruszka) [604608]
+- [agp] intel-agp: Switch to wbinvd_on_all_cpus (Stanislaw Gruszka) [604608]
+- [drm] radeon/kms: add FireMV 2400 PCI ID (Stanislaw Gruszka) [604608]
+- [x86] amd-iommu: Use helper function to destroy domain (Stanislaw Gruszka) [604608]
+- [hwmon] sht15: Fix sht15_calc_temp interpolation function (Stanislaw Gruszka) [604608]
+- [hwmon] sht15: Properly handle the case CONFIG_REGULATOR=n (Stanislaw Gruszka) [604608]
+- [ata] libata: disable NCQ on Crucial C300 SSD (Stanislaw Gruszka) [604608]
+- [x86] thinkpad-acpi: lock down video output state access (Stanislaw Gruszka) [604608]
+- [x86] thinkpad-acpi: convert to seq_file (Stanislaw Gruszka) [604608]
+- [sound] usb: Fix Oops after usb-midi disconnection (Stanislaw Gruszka) [604608]
+- [x86] thinkpad-acpi: log initial state of rfkill switches (Stanislaw Gruszka) [604608]
+- [x86] thinkpad-acpi: use input_set_capability (Stanislaw Gruszka) [604608]
+- [x86] thinkpad-acpi: expose module parameters (Stanislaw Gruszka) [604608]
+- [fs] ext3: Don't update the superblock in ext3_statfs() (Stanislaw Gruszka) [604608]
+- [x86] thinkpad-acpi: log temperatures on termal alarm (Stanislaw Gruszka) [604608]
+- [x86] thinkpad-acpi: adopt input device (Stanislaw Gruszka) [604608]
+- [x86] thinkpad-acpi: issue backlight class events (Stanislaw Gruszka) [604608]
+- [x86] thinkpad-acpi: silence bogus complain during rmmod (Stanislaw Gruszka) [604608]
+- [x86] thinkpad-acpi: fix some version quirks (Stanislaw Gruszka) [604608]
+- [kernel] resource: move kernel function inside __KERNEL__ (Stanislaw Gruszka) [604608]
+- [fs] ext3: journal all modifications in ext3_xattr_set_handle (Stanislaw Gruszka) [604608]
+- [video] backlight: mbp_nvidia_bl - add five more MacBook variants (Stanislaw Gruszka) [604608]
+- [sound] mixart: range checking proc file (Stanislaw Gruszka) [604608]
+- [hid] fix oops in gyration_event() (Stanislaw Gruszka) [604608]
+- [ata] pata_ali: Fix regression with old devices (Stanislaw Gruszka) [604608]
+- [hwmon] lis3: fix show rate for 8 bits chips (Stanislaw Gruszka) [604608]
+- [cgroup] freezer: Fix buggy resume test for tasks frozen with cgroup freezer (Stanislaw Gruszka) [604608]
+- [kernel] genirq: Force MSI irq handlers to run with interrupts disabled (Stanislaw Gruszka) [604608]
+- [fs] fat: fix buffer overflow in vfat_create_shortname() (Stanislaw Gruszka) [604608]
+- [netdrv] mlx4: add dynamic LRO disable support (Amerigo Wang) [584359]
+- [netdrv] s2io: add dynamic LRO disable support (Amerigo Wang) [584359]
+- [drm] nv50: rewrite display irq handler (Ben Skeggs) [598842]
+- [drm] nv50: send evo "update" command after each disconnect (Ben Skeggs) [598842]
+- [drm] nv50: when debugging on, log which crtc we connect an encoder to (Ben Skeggs) [598842]
+- [drm] nv50: supply encoder disable() hook (Ben Skeggs) [598842]
+- [drm] disable encoder rather than dpms off in drm_crtc_prepare_encoders() (Ben Skeggs) [598842]
+- [drm] nv50: DCB quirk for Dell M6300 (Ben Skeggs) [598842]
+- [fs] writeback: limit write_cache_pages integrity scanning to current EOF (Dave Chinner) [602490]
+- [fs] xfs: remove nr_to_write writeback windup. (Dave Chinner) [602490]
+- [fs] writeback: pay attention to wbc->nr_to_write in write_cache_pages (Eric Sandeen) [602490]
+
+* Mon Jul 12 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-46.el6]
+- [fs] ext4: stop issuing discards if not supported by device (Eric Sandeen) [608731]
+- [block] dm: only initialize full request_queue for request-based device (Mike Snitzer) [595393]
+- [block] dm: prevent table type changes after initial table load (Mike Snitzer) [595393]
+- [dm] skip second flush if request unsupported (Mike Snitzer) [612014]
+- [dm] only ignore -EOPNOTSUPP for empty barrier requests (Mike Snitzer) [612014]
+- [dm] snapshot: implement a merge method for snapshot origin (Mike Snitzer) [612375]
+- [dm] snapshot: test chunk size against both origin and snapshot sector size (Mike Snitzer) [612375]
+- [dm] snapshot: open origin before exception store initialization (Mike Snitzer) [612375]
+- [dm] snapshot: iterate both the origin and snapshot devices (Mike Snitzer) [612375]
+- [block] dm: support discard if at least one underlying device supports it (Mike Snitzer) [612014]
+- [block] dm: support discard for multiple devices (Mike Snitzer) [612014]
+- [block] dm: clear the discard flag if the device loses discard capability (Mike Snitzer) [612014]
+- [block] dm: check that target supports discard just before submitting request (Mike Snitzer) [612014]
+- [scsi] convert discard to REQ_TYPE_FS instead of REQ_TYPE_BLOCK_PC (Mike Snitzer) [610054]
+- [scsi] fix leak in scsi_setup_discard_cmnd error path (Mike Snitzer) [610054]
+- [scsi] remove unused free discard page in sd_done (Mike Snitzer) [610054]
+- [scsi] add sd_unprep_fn to free discard page (Mike Snitzer) [610054]
+- [block] implement an unprep function corresponding directly to prep (Mike Snitzer) [610054]
+- [block] don't allocate a payload for discard request (Mike Snitzer) [610054]
+- [fs] ext4: move aio completion after unwritten extent conversion (Christoph Hellwig) [589985]
+- [fs] xfs: move aio completion after unwritten extent conversion (Christoph Hellwig) [589985]
+- [fs] direct-io: move aio_complete into ->end_io (Christoph Hellwig) [589985]
+- [drm] radeon/kms/igp: fix possible divide by 0 in bandwidth code (Dave Airlie) [609755]
+- [drm] nouveau: disable acceleration on NVA3/NVA5/NVA8 by default (Ben Skeggs) [591062]
+- [drm] vt/fbcon: try harder to print output when panicing (Dave Airlie) [579002]
+- [fs] GFS2: fix BUG in gfs2_adjust_quota (Abhijith Das) [603827]
+- [fs] nfsd: nfsd_setattr needs to call commit_metadata (Christoph Hellwig) [593652]
+- [net] netfilter: remove config option NF_CT_ACCT completely (Jiri Pirko) [578476]
+- [net] Revert "[net] bonding: make bonding support netpoll" (Andy Gospodarek) [604672]
+- [scsi] stex: fix inconsistent usage of max_lun (David Milburn) [593255]
+- [kernel] sched: Kill migration thread in CPU_POST_DEAD event in migration_call, instead of CPU_DEAD (Steve Best) [604846]
+- [tracing] ftrace: fix function_graph livelock under kvm (Jason Baron) [596653]
+- [block] dm: mpath fix NULL pointer dereference when path parameters missing (Mike Snitzer) [607242]
+- [dm] dm-replicator: mandatory API change for replicator_resume(), replicator_dev_resume() and reference count fix calling dm_table_get_md() (Heinz Mauelshagen) [594922]
+- [x86] AMD IOMMU: change default to passthrough mode (Bhavna Sarathy) [607631]
+- [x86] dell-laptop: Add another Dell laptop family to the DMI whitelist (Matthew Garrett) [609268]
+- [netdrv] cnic: fix bnx2x panics with multiple interfaces enabled (Stanislaw Gruszka) [609184]
+- [mm] fix khugepaged startup race (Andrea Arcangeli) [612217]
+- [mm] add robustness to pmd_same checks (Andrea Arcangeli) [607650]
+- [mm] Fix vmalloc slow down (Steven Whitehouse) [583026]
+
+* Mon Jul 12 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-45.el6]
+- [drm] i915: fix display setup bugs + hibernate (Dave Airlie) [608515 609763]
+- [fs] NFSv4: Fix an embarassing typo in encode_attrs() (Steve Dickson) [560786]
+- [fs] NFSv4: Ensure that /proc/self/mountinfo displays the minor version number (Steve Dickson) [560786]
+- [fs] NFSv4.1: Ensure that we initialise the session when following a referral (Steve Dickson) [560786]
+- [fs] SUNRPC: Fix a re-entrancy bug in xs_tcp_read_calldir() (Steve Dickson) [560786]
+- [fs] nfs4: use mandatory attribute file type in nfs4_get_root (Steve Dickson) [560786]
+- [x86] UV: uv_irq.c: Fix all sparse warnings (George Beshers) [573095]
+- [x86] uv: Remove recursion in uv_heartbeat_enable() (George Beshers) [573095]
+- [x86] pat: Update the page flags for memtype atomically instead of using memtype_lock (George Beshers) [573095]
+- [x86] UV: Improve BAU performance and error recovery (George Beshers) [573095]
+- [mm] ksm.c: remove an unneeded _notify in write_protect_page (George Beshers) [573095]
+- [x86] UV: Delete unneeded boot messages (George Beshers) [573095]
+- [x86] UV: Fix target_cpus() in x2apic_uv_x.c (George Beshers) [573095]
+- [x86] UV: Clean up UV headers for MMR definitions (George Beshers) [573095]
+- [x86] Enable NMI on all cpus on UV (George Beshers) [573095]
+- [x86] uv: Add serial number parameter to uv_bios_get_sn_info() (George Beshers) [573095]
+- [virt] xen: sync upstream xen_init_cpuid_mask (Andrew Jones) [609028]
+- [virt] xen: disable gbpages on pv guests (Andrew Jones) [609028]
+- [virt] KVM: Fix mov cr3 #GP at wrong instruction (Marcelo Tosatti) [611889]
+- [virt] KVM: Fix mov cr4 #GP at wrong instruction (Marcelo Tosatti) [611889]
+- [virt] KVM: Fix mov cr0 #GP at wrong instruction (Marcelo Tosatti) [611889]
+- [virt] KVM: Add missing srcu_read_lock() for kvm_mmu_notifier_release() (Marcelo Tosatti) [601320]
+- [virt] KVM: limit the number of pages per memory slot (Marcelo Tosatti) [601318]
+- [virt] KVM: MMU: Remove user access when allowing kernel access to gpte.w=0 page (Marcelo Tosatti) [601316]
+- [virt] KVM: x86: Add missing locking to arch specific vcpu ioctls (Marcelo Tosatti) [601313]
+- [virt] KVM: MMU: remove rmap before clear spte (Marcelo Tosatti) [601311]
+- [virt] KVM: MMU: Segregate shadow pages with different cr0.wp (Marcelo Tosatti) [601308]
+- [virt] KVM: x86: Check LMA bit before set_efer (Marcelo Tosatti) [601307]
+- [virt] KVM: Dont allow lmsw to clear cr0.pe (Marcelo Tosatti) [601305]
+- [virt] KVM: VMX: blocked-by-sti must not defer NMI injections (Marcelo Tosatti) [601304]
+- [virt] KVM: x86: Call vcpu_load and vcpu_put in cpuid_update (Marcelo Tosatti) [601303]
+- [virt] KVM: x86: Inject #GP with the right rip on efer writes (Marcelo Tosatti) [601301]
+- [virt] KVM: MMU: Dont read pdptrs with mmu spinlock held in mmu_alloc_roots (Marcelo Tosatti) [601300]
+- [virt] KVM: x86: properly update ready_for_interrupt_injection (Marcelo Tosatti) [601298]
+- [virt] KVM: VMX: enable VMXON check with SMX enabled (Marcelo Tosatti) [601297]
+- [virt] KVM: VMX: free vpid when fail to create vcpu (Marcelo Tosatti) [601292]
+- [virt] vhost: add unlikely annotations to error path (Michael S. Tsirkin) [602607]
+- [virt] vhost: break out of polling loop on error (Michael S. Tsirkin) [602607]
+
+* Wed Jul 07 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-44.el6]
+- [mm] Prevent soft lockup - CPU#0 stuck for 61s! in kswapd0 (Larry Woodman) [596971]
+
+* Tue Jul 06 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-43.el6]
+- [x86] properly account for IRQ injected only into BSP (Gleb Natapov) [609082]
+
+* Wed Jun 30 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-42.el6]
+- [block] writeback: simplify the write back thread queue (Christoph Hellwig) [602595]
+
+* Tue Jun 29 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-41.el6]
+- [mm] Fix slabcache corruption (Larry Woodman) [602595]
+
+* Tue Jun 29 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-40.el6]
+- [infiniband] Add IBoE support (Doug Ledford) [571959]
+- [scsi] hpsa: don't pretend the reset works (Tomas Henzl) [598681]
+- [fs] revert "procfs: provide stack information for threads" and its fixup commits (George Beshers) [573095]
+- [x86] mce: Fix MSR_IA32_MCI_CTL2 CMCI threshold setup (John Villalovos) [593558]
+- [s390x] cio: use exception-save stsch (Hendrik Brueckner) [596333]
+- [s390x] cio: add hook to reenable mss after hibernation (Hendrik Brueckner) [596333]
+- [s390x] cio: allow enable_facility from outside init functions (Hendrik Brueckner) [596333]
+- [x86] wmi: Free the allocated acpi objects through wmi_get_event_data (Stanislaw Gruszka) [606736]
+- [mtd] UBI: fix volume creation input checking (Stanislaw Gruszka) [606736]
+- [mm] avoid THP expose VM bugs (Andrea Arcangeli) [606131]
+- [dm] discard support for the linear target (Mike Snitzer) [608280]
+- [block] fix DISCARD_BARRIER requests (Mike Snitzer) [608280]
+- [block] Don't count_vm_events for discard bio in submit_bio (Mike Snitzer) [608280]
+
+* Tue Jun 29 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-39.el6]
+- [x86] disable PentiumPro memory ordering errata workaround (Gleb Natapov) [605745 606054]
+- [net] Bluetooth: Keep a copy of each HID device's report descriptor (Mauro Carvalho Chehab) [565583]
+- [hid] make Wacom modesetting failures non-fatal (Mauro Carvalho Chehab) [565583]
+- [hid] Implement Wacom quirk in the kernel (Mauro Carvalho Chehab) [565583]
+- [hid] make raw reports possible for both feature and output reports (Mauro Carvalho Chehab) [565583]
+- [kernel] resources: fix call to alignf() in allocate_resource() (Peter Bogdanovic) [587729]
+- [kernel] resources: when allocate_resource() fails, leave resource untouched (Peter Bogdanovic) [587729]
+- [pci] introduce pci_assign_unassigned_bridge_resources (Peter Bogdanovic) [587729]
+- [pci] update bridge resources to get more big ranges in PCI assign unssigned (Peter Bogdanovic) [587729]
+- [pci] add failed_list to pci_bus_assign_resources (Peter Bogdanovic) [587729]
+- [pci] add pci_bridge_release_resources and pci_bus_release_bridge_resources (Peter Bogdanovic) [587729]
+- [kernel] resource: add release_child_resources (Peter Bogdanovic) [587729]
+- [pci] separate pci_setup_bridge to small functions (Peter Bogdanovic) [587729]
+- [scsi] aacraid: Disable ASPM by default (Matthew Garrett) [599735]
+- [pci] Don't enable aspm before drivers have had a chance to veto it (Matthew Garrett) [599735]
+- [netdrv] ehea: Fix kernel deadlock in DLPAR-mem processing (Steve Best) [605736]
+- [netdrv] ehea: fix delayed packet processing (Steve Best) [605738]
+- [netdrv] ehea: fix possible DLPAR/mem deadlock (Steve Best) [600516]
+- [netdrv] ehea: error handling improvement (Steve Best) [600516]
+- [x86] Fall back to GART if initialization fails (Bhavna Sarathy) [598974]
+- [x86] AMD IOMMU memory region fail with buggy BIOS (Bhavna Sarathy) [598974]
+- [virt] Search the LAPIC's for one that will accept a PIC interrupt (Christopher Lalancette) [596223]
+- [virt] KVM: x86: Kick VCPU outside PIC lock again (Christopher Lalancette) [596223]
+- [virt] KVM: x86: In DM_LOWEST, only deliver interrupts to vcpus with enabled LAPIC's (Christopher Lalancette) [596223]
+- [virt] KVM: x86: Allow any LAPIC to accept PIC interrupts (Christopher Lalancette) [596223]
+- [virt] KVM: x86: Introduce a workqueue to deliver PIT timer interrupts (Christopher Lalancette) [596223]
+- [scsi] ibmvfc: Reduce error recovery timeout (Steve Best) [605729]
+- [scsi] ibmvfc: Fix command completion handling (Steve Best) [605729]
+- [powerpc] Enable asymmetric SMT scheduling on POWER7 (Steve Best) [596304]
+- [kernel] sched: Add asymmetric group packing option for sibling domain (Steve Best) [596304]
+- [kernel] sched: Fix capacity calculations for SMT4 (Steve Best) [596304]
+- [fs] Btrfs: update to latest upstream code (Josef Bacik) [593834]
+- [fs] direct-io: do not merge logically non-contiguous requests (Josef Bacik) [593834]
+- [fs] direct-io: add a hook for the fs to provide its own submit_bio function (Josef Bacik) [593834]
+- [fs] allow short direct-io reads to be completed via buffered IO (Josef Bacik) [593834]
+- [fs] GFS2: O_TRUNC not working on stuffed files across cluster (Robert S Peterson) [606428]
+- [nfs] nfsd4: shut down callback queue outside state lock (Jeff Layton) [599522]
+- [security] IMA: policy handling and general cleanups (Eric Paris) [584901]
+- [security] IMA: fix object lifetime to support non ext* FS (Eric Paris) [584901]
+- [netdrv] be2net: Include latest fixes from upstream (Ivan Vecera) [604729]
+- [netdrv] be2net: Add PCI SR-IOV support (Ivan Vecera) [602451]
+- [scsi] hpsa: do not allow hard reset of 640x-boards (Tomas Henzl) [598681]
+- [scsi] hpsa: fix hard reset (Tomas Henzl) [598681]
+- [scsi] hpsa: reset devices code (Tomas Henzl) [598681]
+- [scsi] hpsa: find cfg addrs (Tomas Henzl) [598681]
+- [scsi] hpsa: finding the memory BAR (Tomas Henzl) [598681]
+- [scsi] hpsa: look up the board id (Tomas Henzl) [598681]
+- [x86] uv: uv_global_gru_mmr_address() macro fix (George Beshers) [607696]
+- [crypto] vmac: make it work on big-endian (Jarod Wilson) [605688]
+- [net] ipvs: One-Packet Scheduler (Thomas Graf) [584336]
+- [drm] i915: Disable Sandybridge support for 6.0 (Adam Jackson) [604838 605302]
+- [netdrv] vxge: fix memory leak in vxge_alloc_msix() error path (Michal Schmidt) [580392]
+- [netdrv] vxge: fix SINGLE/MULTI_FUNCTION definitions (Michal Schmidt) [580392]
+- [netdrv] vxge: update to 2.0.8.20182-k (Michal Schmidt) [580392]
+- [sound] fix PCM ring buffer issues (Jaroslav Kysela) [574844 590159 600311]
+- [netdrv] e1000/e1000e: implement a simple interrupt moderation (Andy Gospodarek) [607283]
+- [netdrv] e1000e: add PCI device id to enable support for 82567V-4 (Andy Gospodarek) [607264]
+- [netdrv] e1000e: update driver version number (Andy Gospodarek) [582803]
+- [netdrv] e1000e: enable support for EEE on 82579 (Andy Gospodarek) [582803]
+- [netdrv] e1000e: initial support for 82579 LOMs (Andy Gospodarek) [582803]
+- [netdrv] e1000e: move settting of flow control refresh timer to link setup code (Andy Gospodarek) [582803]
+- [netdrv] e1000e: Fix/cleanup PHY reset code for ICHx/PCHx (Andy Gospodarek) [582803]
+- [netdrv] e1000e: fix check for manageability on ICHx/PCH (Andy Gospodarek) [582803]
+- [netdrv] e1000e: separate out PHY statistics register updates (Andy Gospodarek) [582803]
+- [netdrv] e1000e: more cleanup e1000_sw_lcd_config_ich8lan() (Andy Gospodarek) [582803]
+- [netdrv] e1000e: cleanup e1000_sw_lcd_config_ich8lan() (Andy Gospodarek) [582803]
+- [netdrv] e1000e: cleanup ethtool loopback setup code (Andy Gospodarek) [582803]
+- [netdrv] e1000e: reset MAC-PHY interconnect on 82577/82578 (Andy Gospodarek) [582803]
+- [netdrv] e1000e: Incorrect function pointer set for force_speed_duplex on 82577 (Andy Gospodarek) [598570]
+- [netdrv] e1000e: Reset 82577/82578 PHY before first PHY register read (Andy Gospodarek) [598570]
+- [fs] GFS2: Fix kernel NULL pointer dereference by dlm_astd (Robert S Peterson) [604244]
+- [fs] GFS2: recovery stuck on transaction lock (Robert S Peterson) [590878]
+- [netdrv] tg3: Include support for 5719 device (John Feeney) [595511]
+- [mm] Do not attempt to allocate memory below mmap_min_addr (Eric Paris) [540333]
+- [scsi] qla2xxx: Updated driver version to 8.03.01.05.06.0-k8 (Chad Dupuis) [595477]
+- [scsi] qla2xxx: Add portid to async-request messages (Chad Dupuis) [595477]
+- [scsi] qla2xxx: Propogate transport disrupted status for cable pull conditions for faster failover (Chad Dupuis) [595477]
+- [scsi] qla2xxx: Do not restrict flash operations to specific regions for 4G adapters (Chad Dupuis) [595477]
+- [scsi] qla2xxx: For ISP 23xx, select user specified login timeout value if greater than minuimum value(4 secs) (Chad Dupuis) [595477]
+- [scsi] qla2xxx: Removed redundant check for ISP 84xx (Chad Dupuis) [595477]
+- [scsi] qla2xxx: Do not enable VP in non fabric topology (Chad Dupuis) [595477]
+- [scsi] qla2xxx: Make the FC port capability mutual exclusive (Chad Dupuis) [595477]
+- [scsi] qla2xxx: Limit rport-flaps during link-disruptions (Chad Dupuis) [595477]
+- [scsi] qla2xxx: Correct async-srb issues (Chad Dupuis) [595477]
+- [scsi] qla2xxx: Correct use-after-free oops seen during EH-abort (Chad Dupuis) [595477]
+- [scsi] qla2xxx: Fix cpu-affinity usage for non-capable ISPs (Chad Dupuis) [595477]
+- [scsi] qla2xxx: Limit mailbox command contention for ADISC requests (Chad Dupuis) [595477]
+- [scsi] qla2xxx: Further generalization of SRB CTX infrastructure (Chad Dupuis) [595477]
+- [scsi] qla2xxx: ensure flash operation and host reset via sg_reset are mutually exclusive (Chad Dupuis) [595477]
+- [scsi] qla2xxx: Prevent sending mbx commands from sysfs during isp reset (Chad Dupuis) [595477]
+- [scsi] qla2xxx: Cleanup FCP-command-status processing debug statements (Chad Dupuis) [595477]
+- [scsi] qla2xxx: Clear error status after uncorrectable non-fatal errors (Chad Dupuis) [595477]
+- [scsi] qla2xxx: Add char device to incease driver use count (Chad Dupuis) [595477]
+- [scsi] qla2xxx: Display proper link state for disconnected ports (Chad Dupuis) [595477]
+- [scsi] qla2xxx: Check for ISP84xx before processing to get 84xx firmware version (Chad Dupuis) [595477]
+
+* Fri Jun 25 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-38.el6]
+- [ata] ahci: Fix failure to detect devices (Matthew Garrett) [608146]
+- [ata] ahci: Fix device detection when stopping DMA engines (Matthew Garrett) [601195]
+- [mm] Disable transparent hugepages when running under Xen (Andrea Arcangeli) [605566]
+- [netdrv] tg3: Fix TX BD corruption on 5755+ devices (John Feeney) [603936]
+- [netdrv] tg3: Fix memory leak on 5717/57765/5719 devices (John Feeney) [603933]
+- [netdrv] bnx2: update firmware to 09-5.0.0.j15 to improve performance (John Feeney) [593797]
+- [netdrv] iwlwifi: cancel scan watchdog in iwl_bg_abort_scan (John Linville) [604266]
+- [netdrv] add bnx2_del_napi() to stop rmmod hangs (John Feeney) [599630]
+- [virt] virtio: net: Remove net-specific advertising of PUBLISH_USED feature (Amit Shah) [605591]
+- [virt] KVM: Increase NR_IOBUS_DEVS limit to 200 (Michael S. Tsirkin) [602262]
+- [virt] account only for IRQ injected into BSP (Gleb Natapov) [601564]
+- [virt] KVM: read apic->irr with ioapic lock held (Marcelo Tosatti) [579970]
+- [x86] ACPI: Disable ASPM if the platform won't provide _OSC control for PCIe (Matthew Garrett) [584466]
+- [x86] Move notify_cpu_starting() callback to a later stage (Prarit Bhargava) [600296]
+- [x86] cpuidle: Fix incorrect optimization (John Villalovos) [593549]
+- [block] cfq: Don't allow queue merges for queues that have no process references (Jeff Moyer) [605264]
+- [infiniband] ehca: bitmask handling for lock_hcalls (Steve Best) [605739]
+- [tpm] Fix tpm_readpubek_params_out struct (Peter Bogdanovic) [597235]
+- [usb] Fix a hang of khubd if UHCI is removed (Pete Zaitcev) [579093]
+- [oprofile] fix oprofile samples dropping under load on larger systems (John Villalovos) [561557]
+- [kernel] check SEND_SIG_FORCED on TP_STORE_SIGINFO() (Oleg Nesterov) [591780]
+- [kernel] pids: increase pid_max based on num_possible_cpus (Oleg Nesterov) [593164]
+- [kernel] sys_personality: change sys_personality() to accept "unsigned int" instead of u_long (Oleg Nesterov) [593265]
+- [kernel] fix cgroup's cpu controller to provide fair CPU usage to each group in some conditions (Larry Woodman) [544197]
+- [gpu] vgaarb: fix incorrect dereference of userspace pointer (Danny Feng) [564247]
+- [kernel] sched: avoid cache misses on large machines due to sibling preference (Jerome Marchand) [592302]
+- [scsi] ipr: move setting of the allow_restart flag for vsets (Steve Best) [603090]
+- [scsi] ibmvscsi: fix DMA API misuse (Steve Best) [595417]
+- [netdrv] l2tp: Fix oops in pppol2tp_xmit (Danny Feng) [607055]
+- [net] sysfs: ethtool_ops can be NULL (Danny Feng) [603662]
+- [net] udp: Fix bogus UFO packet generation (Herbert Xu) [602878]
+- [net] vlan: fix vlan_skb_recv() (Michael S. Tsirkin) [598920]
+- [net] bonding: Fix fcoe mpio over inactive slave in a bond (Neil Horman) [603239]
+- [net] bridge: Fix OOM crash in deliver_clone (Herbert Xu) [604494]
+- [s390x] kernel: fix kernel panic caused by using kprobes (Hendrik Brueckner) [596876]
+- [s390x] ccwgroup: add locking around drvdata access (Hendrik Brueckner) [598563]
+- [s390x] cmm: fix module unload handling (Hendrik Brueckner) [598554]
+- [powerpc] Rework VDSO gettimeofday to prevent time going backwards (Steve Best) [591495]
+- [powerpc] Move kdump default base address to 64MB on 64bit (Steve Best) [603779]
+- [fs] gfs2: Better error reporting when mounting a gfs fs without enough journals (Abhijith Das) [600408]
+- [tty] Revert "[tty] fix race in tty_fasync" (Stanislaw Gruszka) [606747]
+- [kdump] kexec: fix OOPS in crash_kernel_shrink (Steve Best) [592336]
+- [fs] btrfs: prevent users from setting ACLs on files they do not own (Danny Feng) [603594] {CVE-2010-2071}
+- [fs] cifs: remove bogus first_time check in NTLMv2 session setup code (Jeff Layton) [604785]
+- [fs] cifs: don't attempt busy-file rename unless it's in same directory (Jeff Layton) [603707]
+- [fs] ext4: Fix compat EXT4_IOC_ADD_GROUP (Eric Sandeen) [602428]
+- [fs] ext4: Prevent creation of files larger than RLIMIT_FSIZE using fallocate (Eric Sandeen) [602427]
+- [fs] ext4: Use our own write_cache_pages() (Eric Sandeen) [602384]
+- [fs] xfs: Make fiemap work in query mode (Eric Sandeen) [602061]
+- [fs] ext4: restart ext4_ext_remove_space() after transaction restart (Josef Bacik) [589645]
+- [fs] ext4: Make sure the MOVE_EXT ioctl can't overwrite append-only files (Eric Sandeen) [601009] {CVE-2010-2066}
+- [fs] btrfs: check for read permission on src file in the clone ioctl (Danny Feng) [593227] {CVE-2010-1636}
+- [drm] radeon: fixes for radeon driver from upstream (Dave Airlie) [589098]
+- [drm] radeon port 2.6.35 HDMI audio to RHEL6 (Jerome Glisse) [604435]
+- [drm] nv50: fix iommu errors caused by device reading from address 0 (Ben Skeggs) [602498]
+- [ata] libata: don't flush dcache on slab pages (Stanislaw Gruszka) [606719]
+- [fs] cifs: don't call cifs_new_fileinfo unless cifs_open succeeds (Jeff Layton) [593422]
+- [fs] cifs: don't ignore cifs_posix_open_inode_helper return value (Jeff Layton) [593422]
+- [fs] cifs: clean up arguments to cifs_open_inode_helper (Jeff Layton) [593422]
+- [fs] cifs: pass instantiated filp back after open call (Jeff Layton) [593422]
+- [fs] cifs: move cifs_new_fileinfo call out of cifs_posix_open (Jeff Layton) [593422]
+- [fs] cifs: implement drop_inode superblock op (Jeff Layton) [593422]
+- [fs] cifs: checkpatch cleanup (Jeff Layton) [593422]
+- [fs] nfsd: ensure sockets are closed on error (Jeff Layton) [603735]
+- [fs] Revert "sunrpc: move the close processing after do recvfrom method" (Jeff Layton) [603735]
+- [fs] Revert "sunrpc: fix peername failed on closed listener" (Jeff Layton) [603735]
+- [virt] kvm: Prevent internal slots from being COWed (Glauber Costa) [601192]
+- [virt] kvm: Keep slot ID in memory slot structure (Glauber Costa) [601192]
+- [fs] writeback: split writeback_inodes_wb (Christoph Hellwig) [601202]
+- [fs] writeback: remove writeback_inodes_wbc (Christoph Hellwig) [601202]
+- [fs] writeback: fix pin_sb_for_writeback (Christoph Hellwig) [601202]
+- [fs] writeback: add missing requeue_io in writeback_inodes_wb (Christoph Hellwig) [601202]
+- [fs] writeback: simplify and split bdi_start_writeback (Christoph Hellwig) [601202]
+- [fs] writeback: simplify wakeup_flusher_threads (Christoph Hellwig) [601202]
+- [fs] writeback: fix writeback_inodes_wb from writeback_inodes_sb (Christoph Hellwig) [601202]
+- [fs] writeback: enforce s_umount locking in writeback_inodes_sb (Christoph Hellwig) [601202]
+- [fs] writeback: queue work on stack in writeback_inodes_sb (Christoph Hellwig) [601202]
+- [fs] writeback: fix writeback completion notifications (Christoph Hellwig) [601202]
+- [fs] vfs: improve writeback_inodes_wb() (Christoph Hellwig) [601202]
+- [fs] writeback: remove unused nonblocking and congestion checks (Christoph Hellwig) [601202]
+- [fs] writeback: remove the always false bdi_cap_writeback_dirty() test (Christoph Hellwig) [601202]
+- [misc] hpilo: fix pointer warning in ilo_ccb_setup (Prarit Bhargava) [603733]
+- [netdrv] libertas_tf: Fix warning in lbtf_rx for stats struct (Prarit Bhargava) [603733]
+- [scsi] Fix userspace warning in /usr/include/scsi/scsi.h (Prarit Bhargava) [603733]
+- [pci] Fix section mismatch warning in pcibios_scan_specific_bus() (Prarit Bhargava) [603733]
+- [fs] Fix warning in fs/ecryptfs/messaging.c: ecryptfs_process_response() (Prarit Bhargava) [603733]
+- [fs] Fix warning in fs/btrfs/ordered-data.c: btrfs_dec_test_ordered_pending() (Prarit Bhargava) [603733]
+- [netdrv] Fix warnings in drivers/net/bnx2.c (Prarit Bhargava) [603733]
+- [doc] Fix warning in Documentation/spi/spidev_fdx.c: do_msg() (Prarit Bhargava) [603733]
+- [kernel] Fix stack warning in lib/decompress_bunzip2.c: get_next_block() (Prarit Bhargava) [603733]
+- [netdrv] Fix warning in drivers/net/vxge/vxge-main.c: vxge_probe() (Prarit Bhargava) [603733]
+- [v4l] Fix warnings in drivers/media/dvb/frontends (Prarit Bhargava) [603733]
+- [trace] Fix warning in include/trace/events/kmem.h: mm_kswapd_ran() (Prarit Bhargava) [603733]
+- [scsi] Fix warning in drivers/scsi/megaraid/megaraid_sas.c: process_fw_state_change_wq() (Prarit Bhargava) [603733]
+- [pcmcia] Fix warnings in drivers/pcmcia/socket_sysfs.c (Prarit Bhargava) [603733]
+- [netdrv] Fix warning in drivers/net/wireless/wl3501_cs.c: wl3501_esbq_exec() (Prarit Bhargava) [603733]
+- [drm] Workaround broken check_headers.pl (Prarit Bhargava) [603733]
+- [isdn] Fix warning in drivers/isdn/hardware/mISDN/hfcpci.c: hfcpci_softirq() (Prarit Bhargava) [603733]
+- [virt] Fix warning in drivers/vhost/vhost.c: vhost_signal() (Prarit Bhargava) [603733]
+- [md] Fix warning in drivers/md/dm-repl.c: _replicator_slink_message() (Prarit Bhargava) [603733]
+- [virt] Fix warning in arch/x86/kvm/svm.c: svm_handle_mce() (Prarit Bhargava) [603733]
+- [net] Fix stack warning in net/mac80211/debugfs_sta.c: sta_agg_status_read() (Prarit Bhargava) [603733]
+- [kernel] Fix warnings in scripts/mod/mod-extract.c (Prarit Bhargava) [603733]
+- [mm] Fix warning in mm/mprotect.c: mprotect_fixup() (Prarit Bhargava) [603733]
+- [mm] Fix warning in mm/mmap.c: __split_vma() (Prarit Bhargava) [603733]
+- [mca] Fix warning in include/linux/mca-legacy.h (Prarit Bhargava) [603733]
+- [mm] Fix warning in include/linux/khugepaged.h (Andrea Arcangeli) [603733]
+- [virt] Fix warnings in drivers/xen/events.c() (Prarit Bhargava) [603733]
+- [x86] Fix warning in drivers/platform/x86/thinkpad_acpi.c (Prarit Bhargava) [603733]
+- [netdrv] Fix warnings in drivers/net/wireless/b43/phy_lp.c (Prarit Bhargava) [603733]
+- [block] Fix warning in drivers/block/cciss.c: fail_all_cmds() (Prarit Bhargava) [603733]
+- [isdn] Fix warnings in drivers/isdn/hardware/mISDN/w6692.c (Prarit Bhargava) [603733]
+- [kernel] Fix compiler warning in sched.c (Larry Woodman) [544197]
+- [fs] fscache/object-list.c: fix warning on 32-bit (Prarit Bhargava) [603733]
+- [sysfs] Fix warning in sysfs_open_file (Prarit Bhargava) [603733]
+- [kdump] Fix warning in kexec_crash_size_show (Prarit Bhargava) [603733]
+- [netdrv] libertas: fix uninitialized variable warning (Prarit Bhargava) [603733]
+- [drm] Fixes linux-next & linux-2.6 checkstack warnings (Prarit Bhargava) [603733]
+- [x86] acpi_pad: squish warning (Prarit Bhargava) [603733]
+- [netdrv] iwlwifi: dynamically allocate buffer for sram debugfs file (Prarit Bhargava) [603733]
+- [isdn] Fix warnings in eicon driver (Prarit Bhargava) [603733]
+- [net] bridge: Make first arg to deliver_clone const (Prarit Bhargava) [603733]
+- [kernel] linux/elfcore.h: hide kernel functions (Prarit Bhargava) [603733]
+- [fs] quota: suppress warning: "quotatypes" defined but not used (Prarit Bhargava) [603733]
+- [fs] fuse: fix large stack use (Prarit Bhargava) [603733]
+- [uwb] wlp: refactor wlp_get_<attribute>() macros (Prarit Bhargava) [603733]
+- [usb] Remove large struct from the stack in USB storage isd200 driver (Prarit Bhargava) [603733]
+- [usb] isp1362: better 64bit printf warning fixes (Prarit Bhargava) [603733]
+- [pci] PCI: kill off pci_register_set_vga_state() symbol export (Prarit Bhargava) [603733]
+- [x86] intel-iommu: Fix section mismatch dmar_ir_support() uses dmar_tbl (Prarit Bhargava) [603733]
+- [v4l] dvb-bt8xx: fix compile warning (Prarit Bhargava) [603733]
+- [tty] tty_buffer: Fix distinct type warning (Prarit Bhargava) [603733]
+- [virt] virtio: fix section mismatch warnings (Prarit Bhargava) [603733]
+- [ata] Fix warning in libata-eh.c (Prarit Bhargava) [603733]
+- [crypto] testmgr: Fix warning (Prarit Bhargava) [603733]
+- [x86] Use __builtin_memset and __builtin_memcpy for memset/memcpy (Prarit Bhargava) [603733]
+- [x86] apic: Fix prototype in hw_irq.h (Prarit Bhargava) [603733]
+- [x86] nmi_watchdog: relax the nmi checks during bootup (Don Zickus) [596760]
+- [x86] nmi_watchdog: disable correct cpu if it fails check (Don Zickus) [596760]
+- [netdrv] iwlwifi: update supported PCI_ID list for 5xx0 series (John Linville) [599148]
+- [netdrv] iwlwifi: recalculate average tpt if not current (John Linville) [595845]
+- [netdrv] iwl3945: enable stuck queue detection on 3945 (John Linville) [595847]
+- [netdrv] iwlwifi: fix internal scan race (John Linville) [595846]
+- [netdrv] iwlwifi: fix scan races (John Linville) [595846]
+- [virt] virtio: fix balloon without VIRTIO_BALLOON_F_STATS_VQ (Amit Shah) [601690]
+- [virt] virtio: Fix scheduling while atomic in virtio_balloon stats (Amit Shah) [601690]
+- [virt] virtio: Add memory statistics reporting to the balloon driver (Amit Shah) [601690]
+- [block] make blk_init_free_list and elevator_init idempotent (Mike Snitzer) [594584]
+- [block] avoid unconditionally freeing previously allocated request_queue (Mike Snitzer) [594584]
+- [virt] vhost: fix the memory leak which will happen when memory_access_ok fails (Michael S. Tsirkin) [599299]
+- [virt] vhost-net: fix to check the return value of copy_to/from_user() correctly (Michael S. Tsirkin) [599299]
+- [virt] vhost: fix to check the return value of copy_to/from_user() correctly (Michael S. Tsirkin) [599299]
+- [virt] vhost: Fix host panic if ioctl called with wrong index (Michael S. Tsirkin) [599299]
+- [block] writeback: fixups for !dirty_writeback_centisecs (Mike Snitzer) [594570]
+- [fs] writeback: disable periodic old data writeback for !dirty_writeback_centisecs (Mike Snitzer) [594570]
+- [modsign] Include the GNU build ID note in the digest (David Howells) [581965]
+- [modsign] Fix a number of module signing bugs (David Howells) [581965]
+- [modsign] KEYS: Return more accurate error codes (David Howells) [591891]
+- [netdrv] ixgbe: fix automatic LRO/RSC settings for low latency (Andy Gospodarek) [595555]
+- [scsi] sync fcoe with upstream (Mike Christie) [603263]
+- [trace] conflicting tracepoint power.h headers (Mark Wielaard) [599175]
+- [netdrv] ixgbe: fix panic when shutting down system with WoL enabled (Andy Gospodarek) [601066]
+- [netdrv] ixgbe: ixgbe_down needs to stop dev_watchdog (Andy Gospodarek) [604807]
+- [scsi] sync fcoe (Mike Christie) [595558]
+- [kernel] CRED: Fix a race in creds_are_invalid() in credentials debugging (James Leddy) [578268]
+- [kernel] Remove timeout logic in mutex_spin_on_owner() to match upstream (Steve Best) [602805]
+
+* Sun Jun 20 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-37.el6]
+- [virt] Disable transparent hugepages when running under Xen (Dor Laor) [605566]
+- [pci] fix compilation when CONFIG_PCI_MSI=n (Vivek Goyal) [589397]
+- [block] virtio_blk: support barriers without FLUSH feature (Christoph Hellwig) [602595]
+- [mm] make compound_lock irqsafe in put_page (Andrea Arcangeli) [605354]
+- [mm] remove compound_lock from futex (Andrea Arcangeli) [605354]
+- [mm] memcontrol compound_lock irqsafe (Andrea Arcangeli) [605354]
+- [mm] add compound_lock_irqsave/irqrestore (Andrea Arcangeli) [605354]
+
+* Wed Jun 16 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-36.el6]
+- [virt] virtio-pci: Disable MSI at startup (Vivek Goyal) [589397]
+- [mm] Reenable transparent hugepages (Aristeu Rozanski) [602436]
+
+* Tue Jun 15 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-35.el6]
+- [mm] Revert "[redhat] Enable transparent hugepages by default" (Aristeu Rozanski) [602436]
+
+* Tue Jun 15 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-34.el6]
+- [net] Revert "[net] bridge: make bridge support netpoll" (Herbert Xu) [602927]
+- [virt] always invalidate and flush on spte page size change (Andrea Arcangeli) [578134]
+- [mm] root anon vma bugchecks (Andrea Arcangeli) [578134]
+- [mm] resurrect the check in page_address_in_vma (Andrea Arcangeli) [578134]
+- [mm] root anon vma use root (Andrea Arcangeli) [578134]
+- [mm] avoid ksm hang (Andrea Arcangeli) [578134]
+- [mm] always add new vmas at the end (Andrea Arcangeli) [578134]
+- [mm] remove unnecessary lock from __vma_link (Andrea Arcangeli) [578134]
+- [mm] optimize hugepage tracking for memcgroup & handle splitting (Rik van Riel) [597108]
+- [mm] properly move a transparent hugepage between cgroups (Rik van Riel) [597081]
+- [mm] scale statistics if the page is a transparent hugepage (Rik van Riel) [597077]
+- [mm] enhance mem_cgroup_charge_statistics with a page_size argument (Rik van Riel) [597058]
+- [virt] add option to disable spinlock patching on hypervisor (Gleb Natapov) [599068]
+- [virt] xen: don't touch xsave in cr4 (Andrew Jones) [599069]
+- [drm] Update core to current drm-linus (Adam Jackson) [589547 589792 597022]
+- [mm] fix refcount bug in anon_vma code (Rik van Riel) [602739]
+
+* Thu Jun 03 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-33.el6]
+- [netdrv] vlan: allow null VLAN ID to be used (Andy Gospodarek) [595555]
+- [netdrv] ixgbe: Add boolean parameter to ixgbe_set_vmolr (Andy Gospodarek) [595555]
+- [netdrv] ixgbe: fix bug when EITR=0 causing no writebacks (Andy Gospodarek) [595555]
+- [netdrv] ixgbe: enable extremely low latency (Andy Gospodarek) [595555]
+- [netdrv] ixgbe: added compat bits (Andy Gospodarek) [595555]
+- [netdrv] ixgbe: dcb, do not tag tc_prio_control frames (Andy Gospodarek) [595555]
+- [netdrv] ixgbe: fix ixgbe_tx_is_paused logic (Andy Gospodarek) [595555]
+- [netdrv] ixgbe: always enable vlan strip/insert when DCB is enabled (Andy Gospodarek) [595555]
+- [netdrv] ixgbe: remove some redundant code in setting FCoE FIP filter (Andy Gospodarek) [595555]
+- [netdrv] ixgbe: fix wrong offset to fc_frame_header in ixgbe_fcoe_ddp (Andy Gospodarek) [595555]
+- [netdrv] ixgbe: fix header len when unsplit packet overflows to data buffer (Andy Gospodarek) [595555]
+- [netdrv] ixgbe: fix setting of promisc mode when using mac-vlans (Andy Gospodarek) [595555]
+- [netdrv] ixgbe: Add support for VF MAC and VLAN configuration (Andy Gospodarek) [595555]
+- [netdrv] ixgbe: fix bug with vlan strip in promsic mode (Andy Gospodarek) [595555]
+- [virt] use unfair spinlock when running on hypervisor (Gleb Natapov) [599068]
+
+* Wed Jun 02 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-32.el6]
+- [kernel] sched: update normalized values on user updates via proc (Hendrik Brueckner) [590748]
+- [kernel] sched: Make tunable scaling style configurable (Hendrik Brueckner) [590748]
+- [s390x] nohz: Introduce arch_needs_cpu (Hendrik Brueckner) [590009]
+- [ppc64] Use form 1 affinity to setup node distance (Steve Best) [594502]
+- [ppc64] numa: Use ibm, architecture-vec-5 to detect form 1 affinity (Steve Best) [594502]
+- [ppc64] Set a smaller value for RECLAIM_DISTANCE to enable zone reclaim (Steve Best) [594502]
+- [block] Add padding to writeback_control (Mike Snitzer) [594570]
+- [fs] cifs: fix page refcount leak (Jeff Layton) [595827]
+- [scsi] megaraid_sas - Add three times Online controller reset (Tomas Henzl) [594821]
+- [scsi] megaraid: update driver version to 4.28 (Tomas Henzl) [577010]
+- [netdrv] tg3: Provide more support for 57765 with v3.108 (John Feeney) [581691]
+- [scsi] skip sense logging for some ATA PASS-THROUGH cdbs (Jeff Moyer) [596997]
+- [block] allow initialization of previously allocated request_queue (Mike Snitzer) [594584]
+- [usb] Fix oops on switching USB controllers (Pete Zaitcev) [578979]
+- [drm] nouveau: important fixes to vbios parser (Ben Skeggs) [596604]
+- [virt] virtio: console: Fix crash when port is unplugged and blocked for write (Amit Shah) [596635]
+- [virt] virtio: console: Fix crash when hot-unplugging a port and read is blocked (Amit Shah) [596635]
+- [kernel] signals: check_kill_permission(): don't check creds if same_thread_group() (Oleg Nesterov) [595499]
+- [drm] fix issue with wake up like upstream commit (Dave Airlie) [577959]
+- [x86] Fix AMD IOMMU suspend/resume (Matthew Garrett) [593787]
+- [mm] do_generic_file_read: clear page errors when issuing a fresh read of the page (Rik van Riel) [596334]
+- [x86] Fix loud HPET warning on Intel Platforms (Prarit Bhargava) [592036]
+- [x86] Intel Cougar Point PCH support for SATA, USB, HD Audio, I2C(SMBUS), and iTCO Watchdog (John Villalovos) [560077]
+- [x86] dell-laptop: Update to match mainline (Matthew Garrett) [586495]
+- [kernel] proc: backport afinity_hint code (Neil Horman) [591509]
+- [scsi] bfa: powerpc compilation warning and endian fix (Rob Evers) [583154]
+- [scsi] bfa: code review fixes (Rob Evers) [583154]
+- [s390x] dasd: fix race between tasklet and dasd_sleep_on (Hendrik Brueckner) [591963]
+- [s390x] vdso: add missing vdso_install target (Hendrik Brueckner) [587368]
+- [mm] mempolicy: fix get_mempolicy() for relative and static nodes (Steve Best) [592327]
+- [net] reserve ports for applications using fixed port numbers (Amerigo Wang) [580970]
+- [kernel] sysctl: add proc_do_large_bitmap (Amerigo Wang) [580970]
+- [kernel] sysctl: refactor integer handling proc code (Amerigo Wang) [580970]
+- [virt] VMware Balloon: clamp number of collected non-balloonable pages (Amit Shah) [582826]
+- [virt] x86, hypervisor: add missing <linux/module.h> (Amit Shah) [582826]
+- [nfs] nfsd4: bug in read_buf (Steve Dickson) [597215]
+- [nfs] svcrdma: RDMA support not yet compatible with RPC6 (Steve Dickson) [597215]
+- [nfs] Revert "nfsd4: distinguish expired from stale stateids" (Steve Dickson) [597215]
+- [nfs] nfsd: safer initialization order in find_file() (Steve Dickson) [597215]
+- [nfs] nfs4: minor callback code simplification, comment (Steve Dickson) [597215]
+- [nfs] NFSD: don't report compiled-out versions as present (Steve Dickson) [597215]
+- [nfs] nfsd4: implement reclaim_complete (Steve Dickson) [597215]
+- [nfs] nfsd4: nfsd4_destroy_session must set callback client under the state lock (Steve Dickson) [597215]
+- [nfs] nfsd4: keep a reference count on client while in use (Steve Dickson) [597215]
+- [nfs] nfsd4: mark_client_expired (Steve Dickson) [597215]
+- [nfs] nfsd4: introduce nfs4_client.cl_refcount (Steve Dickson) [597215]
+- [nfs] nfsd4: refactor expire_client (Steve Dickson) [597215]
+- [nfs] nfsd4: extend the client_lock to cover cl_lru (Steve Dickson) [597215]
+- [nfs] nfsd4: use list_move in move_to_confirmed (Steve Dickson) [597215]
+- [nfs] nfsd4: fold release_session into expire_client (Steve Dickson) [597215]
+- [nfs] nfsd4: rename sessionid_lock to client_lock (Steve Dickson) [597215]
+- [nfs] nfsd4: fix bare destroy_session null dereference (Steve Dickson) [597215]
+- [nfs] nfsd4: use local variable in nfs4svc_encode_compoundres (Steve Dickson) [597215]
+- [nfs] nfsd: further comment typos (Steve Dickson) [597215]
+- [nfs] sunrpc: centralise most calls to svc_xprt_received (Steve Dickson) [597215]
+- [nfs] nfsd4: fix unlikely race in session replay case (Steve Dickson) [597215]
+- [nfs] nfsd4: fix filehandle comment (Steve Dickson) [597215]
+- [nfs] nfsd: potential ERR_PTR dereference on exp_export() error paths (Steve Dickson) [597215]
+- [nfs] nfsd4: complete enforcement of 4.1 op ordering (Steve Dickson) [597215]
+- [nfs] nfsd4: allow 4.0 clients to change callback path (Steve Dickson) [597215]
+- [nfs] nfsd4: rearrange cb data structures (Steve Dickson) [597215]
+- [nfs] NFSD: NFSv4 callback client should use RPC_TASK_SOFTCONN (Steve Dickson) [597215]
+- [nfs] nfsd4: cl_count is unused (Steve Dickson) [597215]
+- [nfs] nfsd4: don't sleep in lease-break callback (Steve Dickson) [597215]
+- [nfs] nfsd4: indentation cleanup (Steve Dickson) [597215]
+- [nfs] nfsd4: consistent session flag setting (Steve Dickson) [597215]
+- [nfs] nfsd4: remove probe task's reference on client (Steve Dickson) [597215]
+- [nfs] nfsd4: remove dprintk (Steve Dickson) [597215]
+- [nfs] nfsd4: shutdown callbacks on expiry (Steve Dickson) [597215]
+- [nfs] nfsd4: preallocate nfs4_rpc_args (Steve Dickson) [597215]
+- [nfs] svcrpc: don't hold sv_lock over svc_xprt_put() (Steve Dickson) [597215]
+- [nfs] nfsd: don't break lease while servicing a COMMIT (Steve Dickson) [597215]
+- [nfs] nfsd: factor out hash functions for export caches (Steve Dickson) [597215]
+- [nfs] sunrpc: never return expired entries in sunrpc_cache_lookup (Steve Dickson) [597215]
+- [nfs] sunrpc/cache: factor out cache_is_expired (Steve Dickson) [597215]
+- [nfs] sunrpc: don't keep expired entries in the auth caches (Steve Dickson) [597215]
+- [nfs] nfsd4: document lease/grace-period limits (Steve Dickson) [597215]
+- [nfs] nfsd4: allow setting grace period time (Steve Dickson) [597215]
+- [nfs] nfsd4: reshuffle lease-setting code to allow reuse (Steve Dickson) [597215]
+- [nfs] nfsd4: remove unnecessary lease-setting function (Steve Dickson) [597215]
+- [nfs] nfsd4: simplify lease/grace interaction (Steve Dickson) [597215]
+- [nfs] nfsd4: simplify references to nfsd4 lease time (Steve Dickson) [597215]
+- [nfs] Fix another nfs_wb_page() deadlock (Steve Dickson) [595478]
+- [nfs] Ensure that we mark the inode as dirty if we exit early from commit (Steve Dickson) [595478]
+- [nfs] Fix a lock imbalance typo in nfs_access_cache_shrinker (Steve Dickson) [595478]
+- [nfs] sunrpc: fix leak on error on socket xprt setup (Steve Dickson) [595478]
+- [pci] Add padding to PCI structs for future enhancements (Prarit Bhargava) [590286]
+
+* Wed May 26 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-31.el6]
+- [mm] fix vma_adjust lock inversion (Andrea Arcangeli) [595808]
+- [mm] eliminate compiler warning introduced by my "kernel pagefault tracepoint for x86 & x86_64 patch" (Larry Woodman) [526032]
+- [netdrv] tg3: Fix INTx fallback when MSI fails (Steve Best) [594456]
+- [virt] correctly trace irq injection on SVM (Gleb Natapov) [594020]
+- [virt] KVM: remove CAP_SYS_RAWIO requirement from kvm_vm_ioctl_assign_irq (Alex Williamson) [594912]
+- [virt] KVM: Fix wallclock version writing race (Glauber Costa) [592033]
+- [x86] Fix double enable_IR_x2apic call on SMP kernel on !SMP boards (Luming Yu) [585122]
+- [block] Adjust elv_iosched_show to return "none" for bio-based DM (Mike Snitzer) [595393]
+- [dm] mpath: Add a feature flag attribute to the multipath structure (Mike Snitzer) [594503]
+- [kernel] fix compat_sys_sched_getaffinity() (Oleg Nesterov) [582407]
+- [usb] usbcore: Fix issue with disabled USB3 protocol ports (Bhavna Sarathy) [591916]
+- [kernel] python: change scripts to use system python instead of env (Don Zickus) [575965]
+- [scsi] mpt2sas: update to 05.100.00.02 (Tomas Henzl) [591971]
+- [virt] Fix FV Xen guest when xen_pv_hvm not enabled (Don Dutile) [523134]
+- [net] enhance network cgroup classifier to work in softirq context (Neil Horman) [595351]
+- [net] gro: Fix bogus gso_size on the first fraglist entry (Herbert Xu) [594561]
+- [nfs] sunrpc trace points (Steve Dickson) [567741]
+- [nfs] don't try to decode GETATTR if DELEGRETURN returned error (Jeff Layton) [584391]
+- [nfs] d_revalidate() is too trigger-happy with d_drop() (Jeff Layton) [587225]
+- [ppc64] Fix zero length strncmp() on powerpc (Steve Best) [593129]
+- [ppc64] pseries: Fix xics interrupt affinity (Steve Best) [592438]
+- [ppc] Improve 64bit copy_tofrom_user (Steve Best) [591344]
+- [fs] GFS2: Fix permissions checking for setflags ioctl() (Steven Whitehouse) [595395] {CVE-2010-1641}
+- [gfs] GFS2: Add two useful messages (Steven Whitehouse) [589510]
+- [serial] fix serial console hang after entering username (John Villalovos) [590851]
+- [kdump] kexec can't load capturing kernel on some big RAM systems (Vitaly Mayatskikh) [580843]
+- [fs] cleanup generic block based fiemap (Josef Bacik) [578560]
+- [fs] vfs: add NOFOLLOW/UNUSED to umount flags (Josef Bacik) [562078]
+- [fs] dlm: fix ast ordering for user locks (David Teigland) [592418]
+- [fs] cifs: fix noserverino handling when unix extensions are enabled (Jeff Layton) [591483]
+- [fs] cifs: don't update uniqueid in cifs_fattr_to_inode (Jeff Layton) [591483]
+- [fs] cifs: always revalidate hardlinked inodes when using noserverino (Jeff Layton) [591483]
+- [fs] cifs: Fix losing locks during fork() (Jeff Layton) [591483]
+- [fs] cifs: propagate cifs_new_fileinfo() error back to the caller (Jeff Layton) [591483]
+- [fs] cifs: add comments explaining cifs_new_fileinfo behavior (Jeff Layton) [591483]
+- [fs] cifs: Allow null nd (as nfs server uses) on create (Jeff Layton) [591483]
+- [fs] cifs: remove unused parameter from cifs_posix_open_inode_helper() (Jeff Layton) [591483]
+- [fs] cifs: drop quota operation stubs (Jeff Layton) [591483]
+- [fs] cifs: Remove unused cifs_oplock_cachep (Jeff Layton) [591483]
+- [fs] cifs: Cleanup various minor breakage in previous cFYI cleanup (Jeff Layton) [591483]
+- [fs] cifs: Neaten cERROR and cFYI macros, reduce text space (Jeff Layton) [591483]
+- [fs] cifs: trivial white space (Jeff Layton) [591483]
+- [fs] cifs: use add_to_page_cache_lru (Jeff Layton) [591483]
+- [fs] cifs: not overwriting file_lock structure after GET_LK (Jeff Layton) [591483]
+- [fs] cifs: Fix a kernel BUG with remote OS/2 server (Jeff Layton) [591483]
+- [fs] cifs: initialize nbytes at the beginning of CIFSSMBWrite() (Jeff Layton) [591483]
+- [fs] cifs: back out patches that didn't make it upstream (Jeff Layton) [591483]
+- [fs] cifs: guard against hardlinking directories (Jeff Layton) [591229]
+- [pci] check caps from sysfs file open to read device dependent config space (Don Dutile) [559709]
+- [fs] sysfs: add struct file* to bin_attr callbacks (Don Dutile) [559709]
+- [ata] pata_via: fixup detection issues (David Milburn) [591074]
+- [security] keys: call_sbin_request_key() must write lock keyrings before modifying them (David Howells) [591891]
+- [security] keys: Use RCU dereference wrappers in keyring key type code (David Howells) [591891]
+- [security] keys: find_keyring_by_name() can gain access to a freed keyring (David Howells) [585101 591891] {CVE-2010-1437}
+- [security] keys: Fix RCU handling in key_gc_keyring() (David Howells) [591891]
+- [security] keys: the request_key() syscall should link an existing key to the dest keyring (David Howells) [591891]
+- [security] keys: don't need to use RCU in keyring_read() as semaphore is held (David Howells) [591891]
+- [security] keys: fix an RCU warning (David Howells) [591891]
+- [security] keys: PTR_ERR return of wrong pointer in keyctl_get_security() (David Howells) [591891]
+- [fs] CacheFiles: Fix error handling in cachefiles_determine_cache_security() (David Howells) [591894]
+- [fs] CacheFiles: Fix occasional EIO on call to vfs_unlink() (David Howells) [591894]
+- [fs] fs-cache: order the debugfs stats correctly (David Howells) [591894]
+- [fs] SLOW_WORK: CONFIG_SLOW_WORK_PROC should be CONFIG_SLOW_WORK_DEBUG (David Howells) [591894]
+- [fs] fscache: add missing unlock (David Howells) [591894]
+- [fs] FS-Cache: Remove the EXPERIMENTAL flag (David Howells) [591894]
+- [fs] CacheFiles: Fix a race in cachefiles_delete_object() vs rename (David Howells) [591894]
+- [fs] switch cachefiles to kern_path() (David Howells) [591894]
+- [fs] FS-Cache: Avoid maybe-used-uninitialised warning on variable (David Howells) [591894]
+- [net] bonding: make bonding support netpoll (Amerigo Wang) [587751]
+- [net] bridge: make bridge support netpoll (Amerigo Wang) [587751]
+- [net] netpoll: add generic support for bridge and bonding devices (Amerigo Wang) [587751]
+- [ppc64] Use lwarx/ldarx hint in bit locks (Steve Best) [594515]
+- [ppc64] 85xx: Make sure lwarx hint isn't set on ppc32 (Steve Best) [594515]
+- [ppc64] Use lwarx hint in spinlocks (Steve Best) [594515]
+- [fs] tmpfs: Insert tmpfs cache pages to inactive list at first (Rik van Riel) [595210]
+- [mm] vmscan: detect mapped file pages used only once (Rik van Riel) [595210]
+- [mm] vmscan: drop page_mapping_inuse() (Rik van Riel) [595210]
+- [mm] vmscan: factor out page reference checks (Rik van Riel) [595210]
+- [nfs] SUNRPC: Don't spam gssd with upcall requests when the kerberos key expired (Steve Dickson) [595478]
+- [nfs] SUNRPC: Reorder the struct rpc_task fields (Steve Dickson) [595478]
+- [nfs] SUNRPC: Remove the 'tk_magic' debugging field (Steve Dickson) [595478]
+- [nfs] SUNRPC: Move the task->tk_bytes_sent and tk_rtt to struct rpc_rqst (Steve Dickson) [595478]
+- [nfs] Don't call iput() in nfs_access_cache_shrinker (Steve Dickson) [595478]
+- [nfs] Clean up nfs_access_zap_cache() (Steve Dickson) [595478]
+- [nfs] Don't run nfs_access_cache_shrinker() when the mask is GFP_NOFS (Steve Dickson) [595478]
+- [nfs] SUNRPC: Ensure rpcauth_prune_expired() respects the nr_to_scan parameter (Steve Dickson) [595478]
+- [nfs] SUNRPC: Ensure memory shrinker doesn't waste time in rpcauth_prune_expired() (Steve Dickson) [595478]
+- [nfs] SUNRPC: Dont run rpcauth_cache_shrinker() when gfp_mask is GFP_NOFS (Steve Dickson) [595478]
+- [nfs] Read requests can use GFP_KERNEL (Steve Dickson) [595478]
+- [nfs] Clean up nfs_create_request() (Steve Dickson) [595478]
+- [nfs] Don't use GFP_KERNEL in rpcsec_gss downcalls (Steve Dickson) [595478]
+- [nfs] NFSv4: Don't use GFP_KERNEL allocations in state recovery (Steve Dickson) [595478]
+- [nfs] SUNRPC: Fix xs_setup_bc_tcp() (Steve Dickson) [595478]
+- [nfs] SUNRPC: Replace jiffies-based metrics with ktime-based metrics (Steve Dickson) [595478]
+- [kernel] ktime: introduce ktime_to_ms() (Steve Dickson) [595478]
+- [nfs] SUNRPC: RPC metrics and RTT estimator should use same RTT value (Steve Dickson) [595478]
+- [nfs] Calldata for nfs4_renew_done() (Steve Dickson) [595478]
+- [nfs] nfs4: renewd renew operations should take/put a client reference (Steve Dickson) [595478]
+- [nfs] Squelch compiler warning in nfs_add_server_stats() (Steve Dickson) [595478]
+- [nfs] Clean up fscache_uniq mount option (Steve Dickson) [595478]
+- [nfs] Squelch compiler warning (Steve Dickson) [595478]
+- [nfs] SUNRPC: Trivial cleanups in include/linux/sunrpc/xdr.h (Steve Dickson) [595478]
+- [nfs] NFSv4: Clean up the NFSv4 setclientid operation (Steve Dickson) [595478]
+- [nfs] NFSv4: Allow attribute caching with 'noac' mounts if client holds a delegation (Steve Dickson) [595478]
+- [nfs] SUNRPC: Fail over more quickly on connect errors (Steve Dickson) [595478]
+- [nfs] SUNRPC: Move the test for XPRT_CONNECTING into xprt_connect() (Steve Dickson) [595478]
+- [nfs] SUNRPC: Cleanup - make rpc_new_task() call rpc_release_calldata on failure (Steve Dickson) [595478]
+- [nfs] SUNRPC: Clean up xprt_release() (Steve Dickson) [595478]
+- [nfs] NFSv4: Fix up the documentation for nfs_do_refmount (Steve Dickson) [595478]
+- [nfs] Replace nfsroot on-stack filehandle (Steve Dickson) [595478]
+- [nfs] Cleanup file handle allocations in fs/nfs/super.c (Steve Dickson) [595478]
+- [nfs] Prevent the mount code from looping forever on broken exports (Steve Dickson) [595478]
+- [nfs] Reduce stack footprint of nfs3_proc_getacl() and nfs3_proc_setacl() (Steve Dickson) [595478]
+- [nfs] Reduce stack footprint of nfs_statfs() (Steve Dickson) [595478]
+- [nfs] Reduce stack footprint of nfs_setattr() (Steve Dickson) [595478]
+- [nfs] Reduce stack footprint of nfs4_proc_create() (Steve Dickson) [595478]
+- [nfs] Reduce the stack footprint of nfs_proc_symlink() (Steve Dickson) [595478]
+- [nfs] Reduce the stack footprint of nfs_proc_create (Steve Dickson) [595478]
+- [nfs] Reduce the stack footprint of nfs_rmdir (Steve Dickson) [595478]
+- [nfs] Reduce stack footprint of nfs_proc_remove() (Steve Dickson) [595478]
+- [nfs] Reduce stack footprint of nfs3_proc_readlink() (Steve Dickson) [595478]
+- [nfs] Reduce the stack footprint of nfs_link() (Steve Dickson) [595478]
+- [nfs] Reduce stack footprint of nfs_readdir() (Steve Dickson) [595478]
+- [nfs] Reduce stack footprint of nfs3_proc_rename() and nfs4_proc_rename() (Steve Dickson) [595478]
+- [nfs] Reduce stack footprint of nfs_revalidate_inode() (Steve Dickson) [595478]
+- [nfs] NFSv4: Reduce stack footprint of nfs4_proc_access() and nfs3_proc_access() (Steve Dickson) [595478]
+- [nfs] NFSv4: Reduce the stack footprint of nfs4_remote_referral_get_sb (Steve Dickson) [595478]
+- [nfs] NFSv4: Reduce stack footprint of nfs4_get_root() (Steve Dickson) [595478]
+- [nfs] Reduce the stack footprint of nfs_follow_remote_path() (Steve Dickson) [595478]
+- [nfs] Reduce the stack footprint of nfs_lookup (Steve Dickson) [595478]
+- [nfs] NFSv4: Reduce the stack footprint of try_location() (Steve Dickson) [595478]
+- [nfs] Reduce the stack footprint of nfs_create_server (Steve Dickson) [595478]
+- [nfs] Reduce the stack footprint of nfs_follow_mountpoint() (Steve Dickson) [595478]
+- [nfs] NFSv4: Eliminate nfs4_path_walk() (Steve Dickson) [595478]
+- [nfs] Add helper functions for allocating filehandles and fattr structs (Steve Dickson) [595478]
+- [nfs] NFSv4: Fix the locking in nfs_inode_reclaim_delegation() (Steve Dickson) [595478]
+- [nfs] fix memory leak in nfs_get_sb with CONFIG_NFS_V4 (Steve Dickson) [595478]
+- [nfs] fix some issues in nfs41_proc_reclaim_complete() (Steve Dickson) [595478]
+- [nfs] Ensure that nfs_wb_page() waits for Pg_writeback to clear (Steve Dickson) [595478]
+- [nfs] Fix an unstable write data integrity race (Steve Dickson) [595478]
+- [nfs] testing for null instead of ERR_PTR() (Steve Dickson) [595478]
+- [nfs] NFSv4: Don't attempt an atomic open if the file is a mountpoint (Steve Dickson) [595478]
+- [nfs] SUNRPC: Fix a bug in rpcauth_prune_expired (Steve Dickson) [595478]
+- [nfs] NFSv4: fix delegated locking (Steve Dickson) [595478]
+- [nfs] Ensure that the WRITE and COMMIT RPC calls are always uninterruptible (Steve Dickson) [595478]
+- [nfs] Fix a race with the new commit code (Steve Dickson) [595478]
+- [nfs] Fix the mode calculation in nfs_find_open_context (Steve Dickson) [595478]
+- [nfs] NFSv4: Fall back to ordinary lookup if nfs4_atomic_open() returns EISDIR (Steve Dickson) [595478]
+- [nfs] SUNRPC: Fix the return value of rpc_run_bc_task() (Steve Dickson) [595478]
+- [nfs] SUNRPC: Fix a use after free bug with the NFSv4.1 backchannel (Steve Dickson) [595478]
+- [nfs] ensure bdi_unregister is called on mount failure (Steve Dickson) [595478]
+- [nfs] fix unlikely memory leak (Steve Dickson) [595478]
+- [nfs] nfs41: renewd sequence operations should take/put client reference (Steve Dickson) [595478]
+- [nfs] prevent backlogging of renewd requests (Steve Dickson) [595478]
+- [nfs] rpc client can not deal with ENOSOCK, so translate it into ENOCONN (Steve Dickson) [595478]
+
+* Tue May 25 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-30.el6]
+- [perf] sync tools/perf to 2.6.34 (Jason Baron) [578987]
+- [drm] i915: Update to 2.6.34-rc7 (Adam Jackson) [592003]
+- [perf] userspace and core update fix (Jason Baron) [567828 578987]
+- [perf] rhel6 perf fixups (Jason Baron) [567828 578987]
+- [perf] backport latest core perf support (Jason Baron) [567828 578987]
+- [perf] pull back 'perf' userspace (Jason Baron) [567828 578987]
+- [drm] radeon/kms: report lvds status as unknown with closed lid (Jerome Glisse) [585111 591628]
+- [drm] fbdev: fix cloning on fbcon (Dave Airlie) [512023]
+- [drm] fbcon disconnected + hotplug operation (Jerome Glisse) [580789]
+- [kernel] slow-work: use get_ref wrapper instead of directly calling get_ref (Dave Airlie) [580789]
+- [drm] radeon/kms: add special workaround for triple head servers (Dave Airlie) [512023]
+- [infiniband] RDMA: Use rlimit helpers (Doug Ledford) [500229]
+- [infiniband] ipoib: returned back addrlen check for mc addresses (Doug Ledford) [500229]
+- [infiniband] RDMA/amso1100: Fix error paths in post_send and post_recv (Doug Ledford) [500229]
+- [infiniband] IB/srp: Clean up error path in srp_create_target_ib() (Doug Ledford) [500229]
+- [infiniband] IB/srp: Split send and recieve CQs to reduce number of interrupts (Doug Ledford) [500229]
+- [infiniband] rdma: potential ERR_PTR dereference (Doug Ledford) [500229]
+- [infiniband] RDMA/cm: Set num_paths when manually assigning path records (Doug Ledford) [500229]
+- [infiniband] IB/cm: Fix device_create() return value check (Doug Ledford) [500229]
+- [infiniband] IB/ucm: Clean whitespace errors (Doug Ledford) [500229]
+- [infiniband] IB/ucm: Increase maximum devices supported (Doug Ledford) [500229]
+- [infiniband] IB/ucm: Use stack variable 'base' in ib_ucm_add_one (Doug Ledford) [500229]
+- [infiniband] IB/ucm: Use stack variable 'devnum' in ib_ucm_add_one (Doug Ledford) [500229]
+- [infiniband] RDMA/cm: Remove unused definition of RDMA_PS_SCTP (Doug Ledford) [500229]
+- [infiniband] RDMA/cm: Revert association of an RDMA device when binding to loopback (Doug Ledford) [500229]
+- [infiniband] IB/addr: Correct CONFIG_IPv6 to CONFIG_IPV6 (Doug Ledford) [500229]
+- [infiniband] IB/addr: Fix IPv6 routing lookup (Doug Ledford) [500229]
+- [infiniband] IB/addr: Simplify resolving IPv4 addresses (Doug Ledford) [500229]
+- [infiniband] RDMA/cm: fix loopback address support (Doug Ledford) [500229]
+- [infiniband] IB/addr: Store net_device type instead of translating to RDMA transport (Doug Ledford) [500229]
+- [infiniband] IB/addr: Verify source and destination address families match (Doug Ledford) [500229]
+- [infiniband] RDMA/cma: Replace net_device pointer with index (Doug Ledford) [500229]
+- [infiniband] RDMA/cma: Fix AF_INET6 support in multicast joining (Doug Ledford) [500229]
+- [infiniband] RDMA/cma: Correct detection of SA Created MGID (Doug Ledford) [500229]
+- [infiniband] RDMA/addr: Use appropriate locking with for_each_netdev() (Doug Ledford) [500229]
+- [infiniband] RDMA/ucma: Add option to manually set IB path (Doug Ledford) [500229]
+- [infiniband] IB/mad: Ignore iWARP devices on device removal (Doug Ledford) [500229]
+- [infiniband] IB/umad: Clean whitespace (Doug Ledford) [500229]
+- [infiniband] IB/umad: Increase maximum devices supported (Doug Ledford) [500229]
+- [infiniband] IB/umad: Use stack variable 'base' in ib_umad_init_port (Doug Ledford) [500229]
+- [infiniband] IB/umad: Use stack variable 'devnum' in ib_umad_init_port (Doug Ledford) [500229]
+- [infiniband] IB/umad: Remove port_table[] (Doug Ledford) [500229]
+- [infiniband] IB/umad: Convert *cdev to cdev in struct ib_umad_port (Doug Ledford) [500229]
+- [infiniband] IB/uverbs: Use anon_inodes instead of private infinibandeventfs (Doug Ledford) [500229]
+- [infiniband] IB/core: Fix and clean up ib_ud_header_init() (Doug Ledford) [500229]
+- [infiniband] IB/core: Pack struct ib_device a little tighter (Doug Ledford) [500229]
+- [infiniband] IB/uverbs: Whitespace cleanup (Doug Ledford) [500229]
+- [infiniband] IB/uverbs: Pack struct ib_uverbs_event_file tighter (Doug Ledford) [500229]
+- [infiniband] IB/uverbs: Increase maximum devices supported (Doug Ledford) [500229]
+- [infiniband] IB/uverbs: use stack variable 'base' in ib_uverbs_add_one (Doug Ledford) [500229]
+- [infiniband] IB/uverbs: Use stack variable 'devnum' in ib_uverbs_add_one (Doug Ledford) [500229]
+- [infiniband] IB/uverbs: Remove dev_table (Doug Ledford) [500229]
+- [infiniband] IB/uverbs: Convert *cdev to cdev in struct ib_uverbs_device (Doug Ledford) [500229]
+- [infiniband] IB/uverbs: Fix return of PTR_ERR() of wrong pointer in ib_uverbs_get_context() (Doug Ledford) [500229]
+- [infiniband] IB: Clarify the documentation of ib_post_send() (Doug Ledford) [500229]
+- [infiniband] IB/ehca: Allow access for ib_query_qp() (Doug Ledford) [500229]
+- [infiniband] IB/ehca: Do not turn off irqs in tasklet context (Doug Ledford) [500229]
+- [infiniband] IB/ehca: Fix error paths in post_send and post_recv (Doug Ledford) [500229]
+- [infiniband] IB/ehca: Rework destroy_eq() (Doug Ledford) [500229]
+- [infiniband] IPoIB: Include return code in trace message for ib_post_send() failures (Doug Ledford) [500229]
+- [infiniband] IPoIB: Fix TX queue lockup with mixed UD/CM traffic (Doug Ledford) [500229]
+- [infiniband] IPoIB: Remove TX moderation settings from ethtool support (Doug Ledford) [500229]
+- [infiniband] IB/ipath: Use bitmap_weight() (Doug Ledford) [500229]
+- [infiniband] Remove BKL from ipath_open() (Doug Ledford) [500229]
+- [rds] remove uses of NIPQUAD, use pI4 (Doug Ledford) [500229]
+- [rds] RDS/IB+IW: Move recv processing to a tasklet (Doug Ledford) [500229]
+- [rds] Do not send congestion updates to loopback connections (Doug Ledford) [500229]
+- [rds] Fix panic on unload (Doug Ledford) [500229]
+- [rds] Fix potential race around rds_i[bw]_allocation (Doug Ledford) [500229]
+- [rds] Add GET_MR_FOR_DEST sockopt (Doug Ledford) [500229]
+- [infiniband] IB/mlx4: Check correct variable for allocation failure (Doug Ledford) [500229]
+- [infiniband] mlx4: replace the dma_sync_single_range_for_cpu/device API (Doug Ledford) [500229]
+- [infiniband] IB/mlx4: Simplify retrieval of ib_device (Doug Ledford) [500229]
+- [infiniband] mlx4_core: Fix cleanup in __mlx4_init_one() error path (Doug Ledford) [500229]
+- [infiniband] IB/mlx4: Fix queue overflow check in post_recv (Doug Ledford) [500229]
+- [infiniband] IB/mlx4: Initialize SRQ scatter entries when creating an SRQ (Doug Ledford) [500229]
+- [infiniband] mlx4: use bitmap_find_next_zero_area (Doug Ledford) [500229]
+- [infiniband] mlx4_core: return a negative error value (Doug Ledford) [500229]
+- [infiniband] mlx4_core: Fix parsing of reserved EQ cap (Doug Ledford) [500229]
+- [infiniband] IB/mlx4: Remove limitation on LSO header size (Doug Ledford) [500229]
+- [infiniband] IB/mlx4: Remove unneeded code (Doug Ledford) [500229]
+- [infiniband] RDMA/nes: Correct cap.max_inline_data assignment in nes_query_qp() (Doug Ledford) [500229]
+- [infiniband] RDMA/nes: Fix CX4 link problem in back-to-back configuration (Doug Ledford) [500229]
+- [infiniband] RDMA/nes: Clear stall bit before destroying NIC QP (Doug Ledford) [500229]
+- [infiniband] RDMA/nes: Set assume_aligned_header bit (Doug Ledford) [500229]
+- [infiniband] convert to use netdev_for_each_mc_addr (Doug Ledford) [500229]
+- [infiniband] RDMA/nes: Add support for KR device id 0x0110 (Doug Ledford) [500229]
+- [infiniband] RDMA/nes: Change WQ overflow return code (Doug Ledford) [500229]
+- [infiniband] RDMA/nes: Multiple disconnects cause crash during AE handling (Doug Ledford) [500229]
+- [infiniband] RDMA/nes: Fix crash when listener destroyed during loopback setup (Doug Ledford) [500229]
+- [infiniband] RDMA/nes: Use atomic counters for CM listener create and destroy (Doug Ledford) [500229]
+- [infiniband] RDMA/nes: Fix stale ARP issue (Doug Ledford) [500229]
+- [infiniband] RDMA/nes: FIN during MPA startup causes timeout (Doug Ledford) [500229]
+- [infiniband] RDMA/nes: Free kmap() resources (Doug Ledford) [500229]
+- [infiniband] RDMA/nes: Check for zero STag (Doug Ledford) [500229]
+- [infiniband] RDMA/nes: Fix Xansation test crash on cm_node ref_count (Doug Ledford) [500229]
+- [infiniband] RDMA/nes: Abnormal listener exit causes loopback node crash (Doug Ledford) [500229]
+- [infiniband] RDMA/nes: Fix crash in nes_accept() (Doug Ledford) [500229]
+- [infiniband] RDMA/nes: Resource not freed for REJECTed connections (Doug Ledford) [500229]
+- [infiniband] RDMA/nes: MPA request/response error checking (Doug Ledford) [500229]
+- [infiniband] RDMA/nes: Fix query of ORD values (Doug Ledford) [500229]
+- [infiniband] RDMA/nes: Fix MAX_CM_BUFFER define (Doug Ledford) [500229]
+- [infiniband] RDMA/nes: Pass correct size to ioremap_nocache() (Doug Ledford) [500229]
+- [infiniband] RDMA/nes: Update copyright and branding string (Doug Ledford) [500229]
+- [infiniband] RDMA/nes: Add max_cqe check to nes_create_cq() (Doug Ledford) [500229]
+- [infiniband] RDMA/nes: Clean up struct nes_qp (Doug Ledford) [500229]
+- [infiniband] RDMA/nes: Implement IB_SIGNAL_ALL_WR as an iWARP extension (Doug Ledford) [500229]
+- [infiniband] RDMA/nes: Add additional SFP+ PHY uC status check and PHY reset (Doug Ledford) [500229]
+- [infiniband] RDMA/nes: Correct fast memory registration implementation (Doug Ledford) [500229]
+- [infiniband] RDMA/nes: Add support for IB_WR_*INV (Doug Ledford) [500229]
+- [infiniband] RDMA/nes: In nes_post_recv() always set bad_wr on error (Doug Ledford) [500229]
+- [infiniband] RDMA/nes: In nes_post_send() always set bad_wr on error (Doug Ledford) [500229]
+- [netdrv] cxgb3: fix linkup issue (Doug Ledford) [500229]
+- [netdrv] RDMA/cxgb3: Wait at least one schedule cycle during device removal (Doug Ledford) [500229]
+- [netdrv] cxgb3: fix hot plug removal crash (Doug Ledford) [500229]
+- [netdrv] RDMA/cxgb3: Mark RDMA device with CXIO_ERROR_FATAL when removing (Doug Ledford) [500229]
+- [netdrv] RDMA/cxgb3: Don't allocate the SW queue for user mode CQs (Doug Ledford) [500229]
+- [netdrv] RDMA/cxgb3: Increase the max CQ depth (Doug Ledford) [500229]
+- [netdrv] RDMA/cxgb3: Doorbell overflow avoidance and recovery (Doug Ledford) [500229]
+- [netdrv] cxgb3: convert to use netdev_for_each_addr (Doug Ledford) [500229]
+- [netdrv] cxgb3: fix link flap (Doug Ledford) [500229]
+- [netdrv] cxgb3: FIx VLAN over Jumbo frames (Doug Ledford) [500229]
+- [netdrv] RDMA/cxgb3: Remove BUG_ON() on CQ rearm failure (Doug Ledford) [500229]
+- [netdrv] cxgb3: fix GRO checksum check (Doug Ledford) [500229]
+- [netdrv] cxgb3: add memory barriers (Doug Ledford) [500229]
+- [netdrv] iwch_cm.c: use pM to show MAC address (Doug Ledford) [500229]
+- [netdrv] cxgb3: Use kzalloc for allocating only one thing (Doug Ledford) [500229]
+- [netdrv] RDMA/cxgb3: Fix error paths in post_send and post_recv (Doug Ledford) [500229]
+- [netdrv] cxgb3: declare MODULE_FIRMWARE (Doug Ledford) [500229]
+- [netdrv] cxgb3: Set the rxq (Doug Ledford) [500229]
+- [netdrv] cxgb3: No need to wake queue in xmit handler (Doug Ledford) [500229]
+- [netdrv] cxgb3: Added private MAC address and provisioning packet handler for iSCSI (Doug Ledford) [500229]
+- [net] Hook up cxgb4 to Kconfig and Makefile (Doug Ledford) [500229]
+- [netdrv] cxgb4: Add remaining driver headers and L2T management (Doug Ledford) [500229]
+- [netdrv] cxgb4: Add main driver file and driver Makefile (Doug Ledford) [500229]
+- [netdrv] cxgb4: Add HW and FW support code (Doug Ledford) [500229]
+- [netdrv] cxgb4: Add packet queues and packet DMA code (Doug Ledford) [500229]
+- [netdrv] cxgb4: Add register, message, and FW definitions (Doug Ledford) [500229]
+- [net] use helpers to access mc list (Doug Ledford) [500229]
+- [net] use helpers to access uc list (Doug Ledford) [500229]
+- [kernel] strstrip incorrectly marked __must_check (Doug Ledford) [500229]
+- [pci] introduce pci_pcie_cap() (Doug Ledford) [500229]
+- [pci] cache PCIe capability offset (Doug Ledford) [500229]
+- [kernel] bitmap: introduce bitmap_set, bitmap_clear, bitmap_find_next_zero_area (Doug Ledford) [500229]
+- [md] Remove unnecessary casts of void * (Doug Ledford) [583050 586296 586299 588371]
+- [md] expose max value of behind writes counter (Doug Ledford) [583050 586296 586299 588371]
+- [md] remove some dead fields from mddev_s (Doug Ledford) [583050 586296 586299 588371]
+- [md] allow integers to be passed to md/level (Doug Ledford) [583050 586296 586299 588371]
+- [md] notify mdstat waiters of level change (Doug Ledford) [583050 586296 586299 588371]
+- [md] don't unregister the thread in mddev_suspend (Doug Ledford) [583050 586296 586299 588371]
+- [md] factor out init code for an mddev (Doug Ledford) [583050 586296 586299 588371]
+- [md] pass mddev to make_request functions rather than request_queue (Doug Ledford) [583050 586296 586299 588371]
+- [md] call md_stop_writes from md_stop (Doug Ledford) [583050 586296 586299 588371]
+- [md] split md_set_readonly out of do_md_stop (Doug Ledford) [583050 586296 586299 588371]
+- [md] factor md_stop_writes out of do_md_stop (Doug Ledford) [583050 586296 586299 588371]
+- [md] start to refactor do_md_stop (Doug Ledford) [583050 586296 586299 588371]
+- [md] factor do_md_run to separate accesses to ->gendisk (Doug Ledford) [583050 586296 586299 588371]
+- [md] remove ->changed and related code (Doug Ledford) [583050 586296 586299 588371]
+- [md] don't reference gendisk in getgeo (Doug Ledford) [583050 586296 586299 588371]
+- [md] move io accounting out of personalities into md_make_request (Doug Ledford) [583050 586296 586299 588371]
+- [md] notify level changes through sysfs (Doug Ledford) [583050 586296 586299 588371]
+- [md] Relax checks on ->max_disks when external metadata handling is used (Doug Ledford) [583050 586296 586299 588371]
+- [md] Correctly handle device removal via sysfs (Doug Ledford) [583050 586296 586299 588371]
+- [md] Add support for Raid5->Raid0 and Raid10->Raid0 takeover (Doug Ledford) [583050 586296 586299 588371]
+- [md] Add support for Raid0->Raid5 takeover (Doug Ledford) [583050 586296 586299 588371]
+- [md] discard StateChanged device flag (Doug Ledford) [583050 586296 586299 588371]
+- [md] manage redundancy group in sysfs when changing level (Doug Ledford) [583050 586296 586299 588371]
+- [md] remove unneeded sysfs files more promptly (Doug Ledford) [583050 586296 586299 588371]
+- [md] set mddev readonly flag on blkdev BLKROSET ioctl (Doug Ledford) [583050 586296 586299 588371]
+- [md] don't insist on valid event count for spare devices (Doug Ledford) [583050 586296 586299 588371]
+- [md] simplify updating of event count to sometimes avoid updating spares (Doug Ledford) [583050 586296 586299 588371]
+- [md] restore ability of spare drives to spin down (Doug Ledford) [583050 586296 586299 588371]
+- [md] raid6: Fix raid-6 read-error correction in degraded state (Doug Ledford) [583050 586296 586299 588371]
+- [md] raid5: allow for more than 2^31 chunks (Doug Ledford) [583050 586296 586299 588371]
+- [md] deal with merge_bvec_fn in component devices better (Doug Ledford) [583050 586296 586299 588371]
+- [md] fix some lockdep issues between md and sysfs (Doug Ledford) [583050 586296 586299 588371]
+- [md] fix 'degraded' calculation when starting a reshape (Doug Ledford) [583050 586296 586299 588371]
+- [md] allow a resync that is waiting for other resync to complete, to be aborted (Doug Ledford) [583050 586296 586299 588371]
+- [md] remove unnecessary code from do_md_run (Doug Ledford) [583050 586296 586299 588371]
+- [md] make recovery started by do_md_run() visible via sync_action (Doug Ledford) [583050 586296 586299 588371]
+- [md] use pU to print UUIDs (Doug Ledford) [583050 586296 586299 588371]
+- [md] add 'recovery_start' per-device sysfs attribute (Doug Ledford) [583050 586296 586299 588371]
+- [md] rcu_read_lock() walk of mddev->disks in md_do_sync() (Doug Ledford) [583050 586296 586299 588371]
+- [md] integrate spares into array at earliest opportunity (Doug Ledford) [583050 586296 586299 588371]
+- [md] move compat_ioctl handling into md.c (Doug Ledford) [583050 586296 586299 588371]
+- [md] add MODULE_DESCRIPTION for all md related modules (Doug Ledford) [583050 586296 586299 588371]
+- [md] raid: improve MD/raid10 handling of correctable read errors (Doug Ledford) [583050 586296 586299 588371]
+- [md] raid10: print more useful messages on device failure (Doug Ledford) [583050 586296 586299 588371]
+- [md] bitmap: update dirty flag when bitmap bits are explicitly set (Doug Ledford) [583050 586296 586299 588371]
+- [md] Support write-intent bitmaps with externally managed metadata (Doug Ledford) [583050 586296 586299 588371]
+- [md] bitmap: move setting of daemon_lastrun out of bitmap_read_sb (Doug Ledford) [583050 586296 586299 588371]
+- [md] support updating bitmap parameters via sysfs (Doug Ledford) [583050 586296 586299 588371]
+- [md] factor out parsing of fixed-point numbers (Doug Ledford) [583050 586296 586299 588371]
+- [md] support bitmap offset appropriate for external-metadata arrays (Doug Ledford) [583050 586296 586299 588371]
+- [md] remove needless setting of thread->timeout in raid10_quiesce (Doug Ledford) [583050 586296 586299 588371]
+- [md] change daemon_sleep to be in 'jiffies' rather than 'seconds' (Doug Ledford) [583050 586296 586299 588371]
+- [md] move offset, daemon_sleep and chunksize out of bitmap structure (Doug Ledford) [583050 586296 586299 588371]
+- [md] collect bitmap-specific fields into one structure (Doug Ledford) [583050 586296 586299 588371]
+- [md] add honouring of suspend_{lo,hi} to raid1 (Doug Ledford) [583050 586296 586299 588371]
+- [md] raid5: don't complete make_request on barrier until writes are scheduled (Doug Ledford) [583050 586296 586299 588371]
+- [md] support barrier requests on all personalities (Doug Ledford) [583050 586296 586299 588371]
+- [md] don't reset curr_resync_completed after an interrupted resync (Doug Ledford) [583050 586296 586299 588371]
+- [md] adjust resync_min usefully when resync aborts (Doug Ledford) [583050 586296 586299 588371]
+
+* Mon May 24 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-29.el6]
+- [mm] fix mm_take_all_locks regression in 3-7/49 (Andrea Arcangeli) [556572]
+- [mm] avoid __cpuset_node_allowed_softwall to run when allocation is atomic (Andrea Arcangeli) [556572 591283]
+- [mm] fix race between do_huge_pmd_anonymous_page and pte_alloc_map (Andrea Arcangeli) [556572]
+- [mm] add missing update for root-anon-vma drop_anon_vma in memory compactation (Andrea Arcangeli) [556572]
+- [mm] exec vs split_huge_page (Andrea Arcangeli) [556572]
+- [mm] include anon hugepages into the anon stats (Andrea Arcangeli) [556572]
+- [mm] split_huge_page anon_vma ordering dependency (Andrea Arcangeli) [556572]
+- [mm] align page_add_new_anon_rmap (Andrea Arcangeli) [556572]
+- [mm] do_pages_move cannot handle hugepages (Andrea Arcangeli) [556572]
+- [mm] padding to decrease risk of kabi breakage (Andrea Arcangeli) [556572]
+- [mm] transhuge isolate_migratepages() (Andrea Arcangeli) [556572]
+- [mm] select CONFIG_COMPACTION if TRANSPARENT_HUGEPAGE enabled (Andrea Arcangeli) [556572]
+- [mm] compaction: Do not schedule work on other CPUs for compaction (Andrea Arcangeli) [556572]
+- [mm] Defer compaction using an exponential backoff when compaction fails (Andrea Arcangeli) [556572]
+- [mm] Add a tunable that decides when memory should be compacted and when it should be reclaimed (Andrea Arcangeli) [556572]
+- [mm] Direct compact when a high-order allocation fails (Andrea Arcangeli) [556572]
+- [mm] Add /sys trigger for per-node memory compaction (Andrea Arcangeli) [556572]
+- [mm] Add /proc trigger for memory compaction (Andrea Arcangeli) [556572]
+- [mm] Memory compaction core (Andrea Arcangeli) [556572]
+- [mm] Move definition for LRU isolation modes to a header (Andrea Arcangeli) [556572]
+- [mm] Export fragmentation index via /proc/extfrag_index (Andrea Arcangeli) [556572]
+- [mm] Export unusable free space index via /proc/unusable_index (Andrea Arcangeli) [556572]
+- [mm] Allow CONFIG_MIGRATION to be set without CONFIG_NUMA or memory hot-remove (Andrea Arcangeli) [556572]
+- [mm] Allow the migration of PageSwapCache pages (Andrea Arcangeli) [556572]
+- [mm] Do not try to migrate unmapped anonymous pages (Andrea Arcangeli) [556572]
+- [mm] Share the anon_vma ref counts between KSM and page migration (Andrea Arcangeli) [556572]
+- [mm] Take a reference to the anon_vma before migrating (Andrea Arcangeli) [556572]
+- [mm] add numa awareness to hugepage allocations (Andrea Arcangeli) [556572]
+- [mm] enable direct defrag (Andrea Arcangeli) [556572]
+- [mm] ksm: check for ERR_PTR from follow_page() (Andrea Arcangeli) [556572]
+- [mm] err.h: add helper function to simplify pointer error checking (Andrea Arcangeli) [556572]
+- [mm] don't leave orhpaned swap cache after ksm merging (Andrea Arcangeli) [556572]
+- [mm] adapt to anon-vma root locking (Andrea Arcangeli) [556572]
+- [mm] set default to never (Andrea Arcangeli) [556572]
+- [mm] transparent hugepage bootparam (Andrea Arcangeli) [556572]
+- [mm] remove lumpy reclaim (Andrea Arcangeli) [556572 583003]
+- [mm] memcg fix prepare migration (Andrea Arcangeli) [556572]
+- [mm] avoid false positive warning in mmio (Andrea Arcangeli) [556572]
+- [virt] fix kvm swapping memory corruption (Andrea Arcangeli) [556572 583861]
+- [mm] remove khugepaged/enabled (Andrea Arcangeli) [556572]
+- [mm] use only khugepaged_wait (Andrea Arcangeli) [556572]
+- [mm] khugepaged user stack (Andrea Arcangeli) [556572]
+- [mm] define hugetlb_page (Andrea Arcangeli) [556572]
+- [mm] migration: avoid race between shift_arg_pages() and rmap_walk() during migration by not migrating temporary stacks (Andrea Arcangeli) [556572]
+- [mm] extend KSM refcounts to the anon_vma root (Andrea Arcangeli) [556572]
+- [mm] always lock the root (oldest) anon_vma (Andrea Arcangeli) [556572]
+- [mm] track the root (oldest) anon_vma (Andrea Arcangeli) [556572]
+- [mm] change direct call of spin_lock(anon_vma->lock) to inline function (Andrea Arcangeli) [556572]
+- [mm] rename anon_vma_lock to vma_lock_anon_vma (Andrea Arcangeli) [556572]
+- [mm] rmap: remove anon_vma check in page_address_in_vma() (Andrea Arcangeli) [556572]
+- [mm] mmap: check ->vm_ops before dereferencing (Andrea Arcangeli) [556572]
+- [fs] xfs_export_operations.commit_metadata (Christoph Hellwig) [585442]
+- [fs] xfs: fix inode pincount check in fsync (Christoph Hellwig) [585442]
+- [fs] xfs: miscellaneous fixes from 2.6.34 (Dave Chinner) [585442]
+- [fs] xfs: reserved block pool and ENOSPC fixes from 2.6.34 (Dave Chinner) [542712 585442]
+- [fs] xfs: delayed write metadata from 2.6.34 (Dave Chinner) [585442]
+- [lib] introduce list_sort (Dave Chinner) [585442]
+- [fs] xfs: log fixes from 2.6.34 (Dave Chinner) [585442]
+- [fs] xfs: quota changes from 2.6.34 (Dave Chinner) [585442]
+- [fs] xfs: buffer API cleanups from 2.6.34 (Dave Chinner) [585442]
+- [fs] xfs: AG indexing fixes from 2.6.34 (Dave Chinner) [585442]
+- [fs] xfs: idle kernel thread fixes from 2.6.34 (Dave Chinner) [585442]
+- [fs] online defrag fixes from 2.6.34 (Dave Chinner) [585442]
+- [fs] jbd2: delay discarding buffers in journal_unmap_buffer (Eric Sandeen) [593082]
+- [fs] ext4: Use slab allocator for sub-page sized allocations (Eric Sandeen) [593082]
+- [fs] jbd2: don't use __GFP_NOFAIL in journal_init_common() (Eric Sandeen) [593082]
+- [fs] jbd: jbd-debug and jbd2-debug should be writable (Eric Sandeen) [593082]
+- [fs] ext4: Fixed inode allocator to correctly track a flex_bg's used_dirs (Eric Sandeen) [593082]
+- [fs] ext4: Fix estimate of # of blocks needed to write indirect-mapped files (Eric Sandeen) [593082]
+- [fs] ext4: fix up rb_root initializations to use RB_ROOT (Eric Sandeen) [593082]
+- [fs] ext4: Release page references acquired in ext4_da_block_invalidatepages (Eric Sandeen) [593082]
+- [fs] ext4: make "offset" consistent in ext4_check_dir_entry() (Eric Sandeen) [593082]
+- [fs] ext4: Convert BUG_ON checks to use ext4_error() instead (Eric Sandeen) [593082]
+- [fs] ext4: Handle non empty on-disk orphan link (Eric Sandeen) [593082]
+- [fs] ext4: explicitly remove inode from orphan list after failed direct io (Eric Sandeen) [593082]
+- [fs] ext4: Fix fencepost error in chosing choosing group vs file preallocation (Eric Sandeen) [593082]
+- [fs] ext4: Fix BUG_ON at fs/buffer.c:652 in no journal mode (Eric Sandeen) [593082]
+- [fs] ext4: correctly calculate number of blocks for fiemap (Eric Sandeen) [593082]
+- [fs] ext4: add missing error checking to ext4_expand_extra_isize_ea() (Eric Sandeen) [593082]
+- [fs] ext4: move __func__ into a macro for ext4_warning, ext4_error (Eric Sandeen) [593082]
+- [fs] ext4: Use bitops to read/modify EXT4_I(inode)->i_state (Eric Sandeen) [593082]
+- [fs] ext4: Drop EXT4_GET_BLOCKS_UPDATE_RESERVE_SPACE flag (Eric Sandeen) [593082]
+- [fs] ext4: return correct wbc.nr_to_write in ext4_da_writepages (Eric Sandeen) [593082]
+- [fs] ext4: replace BUG() with return -EIO in ext4_ext_get_blocks (Eric Sandeen) [593082]
+- [virt] KVM SVM Implement workaround for Erratum 383 (Bhavna Sarathy) [592311]
+- [virt] KVM SVM Handle MCEs early in the vmexit process (Bhavna Sarathy) [592311]
+- [usb] serial: ftdi: add CONTEC vendor and product id (Stanislaw Gruszka) [584757]
+- [usb] fix usbfs regression (Stanislaw Gruszka) [584757]
+- [usb] add new ftdi_sio device ids (Stanislaw Gruszka) [580067]
+- [usb] ftdi_sio: add device IDs (several ELV, one Mindstorms NXT) (Stanislaw Gruszka) [580067]
+- [usb] ftdi_sio: new device id for papouch AD4USB (Stanislaw Gruszka) [580067]
+- [v4l] gspca_mr973010a: Fix cif type 1 cameras not streaming on UHCI controllers (Stanislaw Gruszka) [580067]
+- [v4l] DVB: Add support for Asus Europa Hybrid DVB-T card (Stanislaw Gruszka) [580063]
+- [usb] mos7840: add device IDs for B&B electronics devices (Stanislaw Gruszka) [580063]
+- [ppc64] fsl: Add PCI device ids for new QoirQ chips (Stanislaw Gruszka) [580063]
+- [fs] vfs: Fix vmtruncate() regression (Stanislaw Gruszka) [579693]
+- [kernel] sched: Fix task priority bug (Stanislaw Gruszka) [579693]
+- [serial] 8250_pnp: add a new Fujitsu Wacom Tablet PC device (Stanislaw Gruszka) [579693]
+- [i2c] pca: Don't use *_interruptible (Stanislaw Gruszka) [579693]
+- [i2c] Do not use device name after device_unregister (Stanislaw Gruszka) [579693]
+- [kernel] sched: Fix cpu_clock() in NMIs, on !CONFIG_HAVE_UNSTABLE_SCHED_CLOCK (Stanislaw Gruszka) [579693]
+- [hid] add device IDs for new model of Apple Wireless Keyboard (Stanislaw Gruszka) [579693]
+- [v4l] gspca: sn9c20x: Fix test of unsigned (Stanislaw Gruszka) [579693]
+- [x86] SGI UV: Fix mapping of MMIO registers (Stanislaw Gruszka) [579693]
+- [perf] timechart: Use tid not pid for COMM change (Stanislaw Gruszka) [580062]
+- [usb] fix usbstorage for 2770:915d delivers no FAT (Stanislaw Gruszka) [580062]
+- [x86] PCI/PAT: return EINVAL for pci mmap WC request for !pat_enabled (Stanislaw Gruszka) [580062]
+- [acpi] EC: Add wait for irq storm (Stanislaw Gruszka) [580062]
+- [acpi] EC: Accelerate query execution (Stanislaw Gruszka) [580062]
+- [usb] add speed values for USB 3.0 and wireless controllers (Stanislaw Gruszka) [580062]
+- [usb] add missing delay during remote wakeup (Stanislaw Gruszka) [580062]
+- [usb] EHCI & UHCI: fix race between root-hub suspend and port resume (Stanislaw Gruszka) [580062]
+- [usb] EHCI: fix handling of unusual interrupt intervals (Stanislaw Gruszka) [580062]
+- [usb] Don't use GFP_KERNEL while we cannot reset a storage device (Stanislaw Gruszka) [580062]
+- [usb] serial: fix memory leak in generic driver (Stanislaw Gruszka) [580062]
+- [char] nozomi: quick fix for the close/close bug (Stanislaw Gruszka) [580062]
+- [tty] fix race in tty_fasync (Stanislaw Gruszka) [580062]
+- [netdrv] netiucv: displayed TX bytes value much too high (Stanislaw Gruszka) [580063]
+- [block] md: fix small irregularity with start_ro module parameter (Stanislaw Gruszka) [580063]
+- [input] i8042: add Dritek quirk for Acer Aspire 5610 (Stanislaw Gruszka) [580063]
+- [hid] fixup quirk for NCR devices (Stanislaw Gruszka) [580063]
+- [dmi] allow omitting ident strings in DMI tables (Stanislaw Gruszka) [580063]
+- [scsi] scsi_dh: create sysfs file, dh_state for all SCSI disk devices (Stanislaw Gruszka) [580063]
+- [nfs] Revert default r/wsize behavior (Stanislaw Gruszka) [580063]
+- [usb] SIS USB2VGA DRIVER: support KAIREN's USB VGA adaptor USB20SVGA-MB-PLUS (Stanislaw Gruszka) [580067]
+- [input] alps: add support for the touchpad on Toshiba Tecra A11-11L (Stanislaw Gruszka) [584757]
+- [fs] gfs2: stuck in inode wait, no glocks stuck (Robert S Peterson) [583737]
+- [netdrv] cnic: update to to 2.1.1 (Stanislaw Gruszka) [590019]
+- [netdrv] bnx2x: fix system hung after netdev watchdog (Stanislaw Gruszka) [581907]
+- [netdrv] bnx2: Fix most severe bugs in bnx2 2.0.8+ (John Feeney) [590879]
+- [netdrv] Update bnx2 driver to 2.0.8 and fw to mips-06-5.0.0.j6 et al (John Feeney) [464728]
+- [virt] VMware Balloon driver (Amit Shah) [582826]
+- [x86] With Sandybridge graphics, kernel reboots unless 'agp=off' used on command line (John Villalovos) [591294]
+- [kernel] unify string representation of NULL in vsprintf.c (Dave Anderson) [589613]
+- [kernel] coredump: fix the page leak in dump_seek() (Oleg Nesterov) [580126]
+- [edac] EDAC support for Nehalem Memory Controllers (Mauro Carvalho Chehab) [584507]
+- [iscsi] Include support for next gen Dell iSCSI PowerVault controller MD36xxi into RDAC scsi device handler's device list (Shyam Iyer) [593814]
+- [scsi] lpfc Update from 8.3.5.9 to 8.3.5.13 FC/FCoE (Rob Evers) [591648]
+- [infiniband] iser: fix failover slowdown (Mike Christie) [589174]
+- [net] TCP: avoid to send keepalive probes if receiving data (Flavio Leitner) [593052]
+- [nfs] commit_metadata export operation replacing nfsd_sync_dir (Christoph Hellwig) [593652]
+- [ppc64] numa: Add form 1 NUMA affinity (Steve Best) [593466]
+- [ppc64] eeh: Fix a bug when pci structure is null (Steve Best) [593854]
+- [ppc64] perf_event: Fix oops due to perf_event_do_pending call (Steve Best) [593464]
+- [ppc] pseries: Quieten cede latency printk (Steve Best) [591739]
+- [fs] GFS2: Don't "get" xattrs for ACLs when ACLs are turned off (Steven Whitehouse) [546294]
+- [kexec] fix OOPS in crash_kernel_shrink (Steve Best) [592336]
+- [fs] ext4: don't use quota reservation for speculative metadata blocks (Eric Sandeen) [587095]
+- [fs] quota: add the option to not fail with EDQUOT in block allocation (Eric Sandeen) [587095]
+- [fs] quota: use flags interface for dquot alloc/free space (Eric Sandeen) [587095]
+- [fs] ext4: Fix quota accounting error with fallocate (Eric Sandeen) [587095]
+- [fs] ext4: Ensure zeroout blocks have no dirty metadata (Eric Sandeen) [587095]
+- [virt] vhost-net: utilize PUBLISH_USED_IDX feature (Michael S. Tsirkin) [593158]
+- [virt] virtio: put last seen used index into ring itself (Michael S. Tsirkin) [593158]
+- [virt] vhost: fix barrier pairing (Michael S. Tsirkin) [593158]
+- [virt] virtio: use smp_XX barriers on SMP (Michael S. Tsirkin) [593158]
+- [virt] virtio_ring: remove a level of indirection (Michael S. Tsirkin) [593158]
+- [virt] trans_virtio: use virtqueue_xxx wrappers (Michael S. Tsirkin) [593158]
+- [virt] virtio-rng: use virtqueue_xxx wrappers (Michael S. Tsirkin) [593158]
+- [virt] virtio_net: use virtqueue_xxx wrappers (Michael S. Tsirkin) [593158]
+- [virt] virtio_blk: use virtqueue_xxx wrappers (Michael S. Tsirkin) [593158]
+- [virt] virtio_console: use virtqueue_xxx wrappers (Michael S. Tsirkin) [593158]
+- [virt] virtio_balloon: use virtqueue_xxx wrappers (Michael S. Tsirkin) [593158]
+- [virt] virtio: add virtqueue_ vq_ops wrappers (Michael S. Tsirkin) [593158]
+- [virt] vhost-net: fix vq_memory_access_ok error checking (Michael S. Tsirkin) [593158]
+- [virt] vhost: fix error handling in vring ioctls (Michael S. Tsirkin) [593158]
+- [virt] vhost: fix interrupt mitigation with raw sockets (Michael S. Tsirkin) [593158]
+- [virt] vhost: fix error path in vhost_net_set_backend (Michael S. Tsirkin) [593158]
+- [netdrv] iwlwifi: iwl_good_ack_health() only apply to AGN device (John Linville) [573029]
+- [netdrv] iwlwifi: code cleanup for connectivity recovery (John Linville) [573029]
+- [netdrv] iwlwifi: Recover TX flow failure (John Linville) [573029]
+- [netdrv] iwlwifi: move plcp check to separated function (John Linville) [573029]
+- [netdrv] iwlwifi: Recover TX flow stall due to stuck queue (John Linville) [573029]
+- [netdrv] iwlwifi: add internal short scan support for 3945 (John Linville) [573029]
+- [netdrv] iwlwifi: separated time check for different type of force reset (John Linville) [573029]
+- [netdrv] iwlwifi: Adjusting PLCP error threshold for 1000 NIC (John Linville) [573029]
+- [netdrv] iwlwifi: multiple force reset mode (John Linville) [573029]
+- [netdrv] iwlwifi: Tune radio to prevent unexpected behavior (John Linville) [573029]
+- [netdrv] iwlwifi: Logic to control how frequent radio should be reset if needed (John Linville) [573029]
+- [netdrv] iwlwifi: add function to reset/tune radio if needed (John Linville) [573029]
+- [netdrv] iwlwifi: clear all the stop_queue flag after load firmware (John Linville) [573029]
+- [netdrv] iwlwifi: check for aggregation frame and queue (John Linville) [573029]
+- [ppc64] kdump: Fix race in kdump shutdown (Steve Best) [559709]
+- [ppc64] kexec: Fix race in kexec shutdown (Steve Best) [593853]
+- [net] Add ndo_{set|get}_vf_port support for enic dynamic vnics (Chris Wright) [581087]
+- [net] Add netlink support for virtual port management (was iovnl) (Chris Wright) [581087]
+- [net] core: add IFLA_STATS64 support (Chris Wright) [581087]
+- [netdrv] igb: support for VF configuration tools (Chris Wright) [581087]
+- [net] rtnetlink: Add SR-IOV VF configuration methods (Chris Wright) [581087]
+- [pci] Add SR-IOV convenience functions and macros (Chris Wright) [581087]
+- [scsi] sync iscsi layer (Mike Christie) [564148 570682]
+
+* Thu May 20 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-28.el6]
+- [mm] New round-robin rotor for SLAB allocations (Larry Woodman) [593154]
+- [netdrv] ixgbe: FCoE fixes (Andy Gospodarek) [593474]
+- [net] vlan: updates vlan real_num_tx_queues (Andy Gospodarek) [593474]
+- [net] vlan: adds vlan_dev_select_queue (Andy Gospodarek) [593474]
+- [net] vlan: Precise RX stats accounting (Andy Gospodarek) [593474]
+- [net] add dev_txq_stats_fold() helper (Andy Gospodarek) [593474]
+- [net] vlan: Add support to netdev_ops.ndo_fcoe_get_wwn for VLAN device (Andy Gospodarek) [593474]
+- [netdrv] ixgbe: fixes for link problems, possible DMA errors, and VF/SR-IOV changes (Andy Gospodarek) [575188]
+- [sound] ALSA HDA driver update 2010-05-11 (Jaroslav Kysela) [591083]
+- [mm] show per-process swap usage via procfs (Larry Woodman) [546533]
+- [netdrv] cxgb3 won't recover from EEH event twice (Steve Best) [591738]
+- [virt] x86, cpu: Print AMD virtualization features in /proc/cpuinfo (Gleb Natapov) [592688]
+- [x86] Intel ICH9 workaround for HPET timer issue on IbexPeak Platform (Luming Yu) [502629]
+- [pci] Update pci_dev and pci_bus structs before kabi freeze (Prarit Bhargava) [593322]
+- [pci] Output FW warning in pci_read/write_vpd (Prarit Bhargava) [586979]
+- [infiniband] ehca: Require in_wc in process_mad() (Steve Best) [593095]
+- [security] mmap_min_addr check CAP_SYS_RAWIO only for write (Eric Paris) [592417]
+- [scsi] aacraid: Eliminate use after free (Tomas Henzl) [592926]
+- [scsi] lpfc Update from 8.3.5.7 to 8.3.5.9 FC/FCoE (Rob Evers) [580677]
+- [char] Eliminate use after free (Amit Shah) [593189]
+- [ipmi] fix unlock balance (Tomas Henzl) [592925]
+- [ppc64] only call start-cpu when a CPU is stopped (Steve Best) [592440]
+- [ppc64] make query_cpu_stopped callable outside hotplug cpu (Steve Best) [592440]
+- [kernel] cpufreq: make the iowait-is-busy-time a sysfs tunable (Rik van Riel) [585330]
+- [kernel] ondemand: Solve the big performance issue with ondemand during disk IO (Rik van Riel) [585330]
+- [kernel] sched: introduce get_cpu_iowait_time_us() (Rik van Riel) [585330]
+- [kernel] sched: eliminate the ts->idle_lastupdate field (Rik van Riel) [585330]
+- [kernel] sched: fold updating of the last update time into update_ts_time_stats() (Rik van Riel) [585330]
+- [kernel] sched: update the idle statistics in get_cpu_idle_time_us (Rik van Riel) [585330]
+- [kernel] sched: introduce a function to update the idle statistics (Rik van Riel) [585330]
+- [kernel] sched: add a comment to get_cpu_idle_time_us (Rik van Riel) [585330]
+- [kernel] nohz: Reuse ktime in sub-functions of tick_check_idle (Rik van Riel) [585330]
+- [virt] Xen PV-on-HVM: Disable xen-blkfront for IDE & SCSI devices (Don Dutile) [523134]
+- [virt] xen: PV-on-HVM: Disable xen-blkfront for PV-on-HVM for now (Don Dutile) [523134]
+- [virt] xen: PV-on-HVM: Prevent pv drivers from crashing a FV guest if pv-on-hvm not configured (Don Dutile) [523134]
+- [virt] xen: PV-on-HVM: Add kernel command line enablement control (Don Dutile) [523134]
+- [virt] xen: backport PV-on-HVM (Don Dutile) [523134]
+- [ppc] pseries: Pass more accurate number of supported cores to firmware (Steve Best) [591341]
+- [ppc] Add static fields to ibm, client-architecture call (Steve Best) [591341]
+- [kernel] mutex: Fix optimistic spinning vs. BKL (Steve Best) [591735]
+- [kernel] mutex: Don't spin when the owner CPU is offline or other weird cases (Steve Best) [591735]
+- [kernel] sched: Don't use possibly stale sched_class (Stanislaw Gruszka) [580067]
+- [usb] unusual_devs: Add support for multiple Option 3G sticks (Stanislaw Gruszka) [580067]
+- [usb] cp210x: Add 81E8 Zephyr Bioharness (Stanislaw Gruszka) [580067]
+- [usb] serial: ftdi: add CONTEC vendor and product id (Stanislaw Gruszka) [580067]
+- [usb] ftdi_sio: sort PID/VID entries in new ftdi_sio_ids.h header (Stanislaw Gruszka) [580067]
+- [usb] ftdi_sio: isolate all device IDs to new ftdi_sio_ids.h header (Stanislaw Gruszka) [580067]
+- [usb] Move hcd free_dev call into usb_disconnect to fix oops (Stanislaw Gruszka) [580067]
+- [usb] remove debugging message for uevent constructions (Stanislaw Gruszka) [580067]
+- [usb] fix crash in uhci_scan_schedule (Stanislaw Gruszka) [580067]
+- [usb] fix the idProduct value for USB-3.0 root hubs (Stanislaw Gruszka) [580067]
+- [usb] xhci: Fix finding extended capabilities registers (Stanislaw Gruszka) [580067]
+- [x86] Fix SCI on IOAPIC != 0 (Stanislaw Gruszka) [580067]
+- [x86] Avoid race condition in pci_enable_msix() (Stanislaw Gruszka) [580067]
+- [x86] thinkpad-acpi: make driver events work in NVRAM poll mode (Stanislaw Gruszka) [580067]
+- [x86] thinkpad-acpi: document HKEY event 3006 (Stanislaw Gruszka) [580067]
+- [x86] thinkpad-acpi: R52 brightness_mode has been confirmed (Stanislaw Gruszka) [580067]
+- [x86] thinkpad-acpi: fix poll thread auto-start (Stanislaw Gruszka) [580067]
+- [net] scm: Only support SCM_RIGHTS on unix domain sockets. (Stanislaw Gruszka) [580067]
+- [usb] serial: sierra driver indat_callback fix (Stanislaw Gruszka) [580067]
+- [tty] Fix the ldisc hangup race (Stanislaw Gruszka) [580067]
+- [kernel] devtmpfs: reset inode permissions before unlinking (Stanislaw Gruszka) [580067]
+- [kernel] driver-core: fix race condition in get_device_parent() (Stanislaw Gruszka) [580067]
+- [pm] hibernate: Fix preallocating of memory (Stanislaw Gruszka) [580067]
+- [tpm] tpm_tis: TPM_STS_DATA_EXPECT workaround (Stanislaw Gruszka) [580067]
+- [fs] Switch proc/self to nd_set_link() (Stanislaw Gruszka) [580067]
+- [hid] usbhid: introduce timeout for stuck ctrl/out URBs (Stanislaw Gruszka) [580067]
+- [hid] add multi-input quirk for NextWindow Touchscreen (Stanislaw Gruszka) [580067]
+- [hid] remove TENX iBuddy from blacklist (Stanislaw Gruszka) [580067]
+- [fs] vfs: take f_lock on modifying f_mode after open time (Stanislaw Gruszka) [580067]
+- [acpi] thinkpad-acpi: wrong thermal attribute_group removed in thermal_exit() (Stanislaw Gruszka) [580067]
+- [acpi] fix "acpi=ht" boot option (Stanislaw Gruszka) [580067]
+- [acpi] remove Asus P2B-DS from acpi=ht blacklist (Stanislaw Gruszka) [580067]
+- [pci] hotplug: check ioremap() return value in ibmphp_ebda.c (Stanislaw Gruszka) [580067]
+- [pci] hotplug: ibmphp: read the length of ebda and map entire ebda region (Stanislaw Gruszka) [580067]
+- [x86] msr/cpuid: Pass the number of minors when unregistering MSR and CPUID drivers (Stanislaw Gruszka) [580063]
+- [fs] fnctl: f_modown should call write_lock_irqsave/restore (Stanislaw Gruszka) [580063]
+- [sound] ASoC: fix a memory-leak in wm8903 (Stanislaw Gruszka) [580063]
+- [mtd] UBI: initialise update marker (Stanislaw Gruszka) [580063]
+- [mtd] UBI: fix memory leak in update path (Stanislaw Gruszka) [580063]
+- [ipc] ns: fix memory leak (idr) (Stanislaw Gruszka) [580063]
+- [input] i8042: remove identification strings from DMI tables (Stanislaw Gruszka) [580063]
+- [netdrv] starfire: clean up properly if firmware loading fails (Stanislaw Gruszka) [580064]
+- [kernel] random: drop weird m_time/a_time manipulation (Stanislaw Gruszka) [580064]
+- [kernel] random: Remove unused inode variable (Stanislaw Gruszka) [580064]
+- [mm] purge fragmented percpu vmap blocks (Stanislaw Gruszka) [580064]
+- [mm] percpu-vmap fix RCU list walking (Stanislaw Gruszka) [580064]
+- [x86] Add quirk for Intel DG45FC board to avoid low memory corruption (Stanislaw Gruszka) [580064]
+- [regulator] Specify REGULATOR_CHANGE_STATUS for WM835x LED constraints (Stanislaw Gruszka) [580064]
+- [x86] Add Dell OptiPlex 760 reboot quirk (Stanislaw Gruszka) [580064]
+- [mm] fix migratetype bug which slowed swapping (Stanislaw Gruszka) [580064]
+- [input] winbond-cir: remove dmesg spam (Stanislaw Gruszka) [580064]
+- [acpi] Advertise to BIOS in _OSC: _OST on _PPC changes (Stanislaw Gruszka) [580064]
+- [infiniband] Fix failure exit in ipathfs (Stanislaw Gruszka) [580064]
+- [acpi] fix OSC regression that caused aer and pciehp not to load (Stanislaw Gruszka) [580064]
+- [acpi] Add platform-wide _OSC support (Stanislaw Gruszka) [580064]
+- [acpi] Add a generic API for _OSC (Stanislaw Gruszka) [580064]
+- [s390x] fix single stepped svcs with TRACE_IRQFLAGS=y (Stanislaw Gruszka) [580064]
+- [fs] sysfs: sysfs_sd_setattr set iattrs unconditionally (Stanislaw Gruszka) [580065]
+- [acpi] fix High cpu temperature with 2.6.32 (Stanislaw Gruszka) [580065]
+- [usb] usbfs: properly clean up the as structure on error paths (Stanislaw Gruszka) [580065]
+- [kernel] class: Free the class private data in class_release (Stanislaw Gruszka) [580065]
+- [serial] 8250: add serial transmitter fully empty test (Stanislaw Gruszka) [580065]
+- [rtc] rtc-fm3130: add missing braces (Stanislaw Gruszka) [580065]
+- [ata] Call flush_dcache_page after PIO data transfers in libata-sff.c (Stanislaw Gruszka) [580065]
+- [net] dst: call cond_resched() in dst_gc_task() (Stanislaw Gruszka) [580065]
+- [crypto] padlock-sha: Add import/export support (Stanislaw Gruszka) [580065]
+- [x86] dell-wmi, hp-wmi: check wmi_get_event_data() return value (Stanislaw Gruszka) [580065]
+- [tpm] tpm_infineon: fix suspend/resume handler for pnp_driver (Stanislaw Gruszka) [580065]
+- [usb] ftdi_sio: add USB device ID's for B&B Electronics line (Stanislaw Gruszka) [580063]
+- [fs] anon_inode: set S_IFREG on the anon_inode (Eric Paris) [591813]
+
+* Tue May 18 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-27.el6]
+- [ppc] pseries: Flush lazy kernel mappings after unplug operations (Steve Best) [591340]
+- [fs] ext3: enable barriers by default (Eric Sandeen) [586062]
+- [tracing] regset xstate extensions + generic PTRACE_{GET,SET}REGSET support (Oleg Nesterov) [587724]
+- [scsi] hpsa: update to 2.0.2 (Tomas Henzl) [587418]
+- [mm] Print more information about the task being OOM killed (Larry Woodman) [546533]
+- [netdrv] igb/igbvf: use netdev_alloc_skb_ip_align() (Stefan Assmann) [589497]
+- [acpi] Fix regression where _PPC is not read at boot even when ignore_ppc=0 (Matthew Garrett) [571893]
+- [x86] i386: Do a global tlb flush on S4 resume (Matthew Garrett) [572818]
+- [pci] Add ABI for PCI runtime power management (Matthew Garrett) [589781]
+- [block] Fix regression in O_DIRECT|O_SYNC writes to block devices (Jeff Moyer) [582628]
+- [kernel] add skip_spaces() implementation (Jaroslav Kysela) [591078]
+- [kernel] sched: cpuacct: Use bigger percpu counter batch values for stats counters (Steve Best) [591343]
+- [kernel] idr: fix a critical misallocation bug (Eric Paris) [582109]
+- [net] tcp: Fix OOB POLLIN avoidance (Oleg Nesterov) [584786]
+- [s390x] qeth: synchronize configuration interface (Hendrik Brueckner) [586962]
+- [fs] inotify: race use after free/double free in inotify inode marks (Eric Paris) [582109]
+- [fs] ext4: Add flag to files with blocks intentionally past EOF (Eric Sandeen) [578562]
+- [drm] backport patches up to 2.6.34-rc7 (Adam Jackson) [589792]
+- [kernel] elf coredump: add extended numbering support (Amerigo Wang) [578659]
+- [kernel] binfmt_elf_fdpic: Fix build breakage introduced by coredump changes. (Amerigo Wang) [578659]
+- [kernel] elf coredump: make offset calculation process and writing process explicit (Amerigo Wang) [578659]
+- [kernel] elf coredump: replace ELF_CORE_EXTRA_* macros by functions (Amerigo Wang) [578659]
+- [kernel] coredump: move dump_write() and dump_seek() into a header file (Amerigo Wang) [578659]
+- [kernel] coredump: unify dump_seek() implementations for each binfmt_*.c (Amerigo Wang) [578659]
+- [mm] introduce coredump parameter structure (Amerigo Wang) [578659]
+- [powerpc] Reduce printk from pseries_mach_cpu_die() (Steve Best) [590754]
+- [powerpc] Move checks in pseries_mach_cpu_die() (Steve Best) [590754]
+- [powerpc] Reset kernel stack on cpu online from cede state (Steve Best) [590754]
+- [virt] don't compute pvclock adjustments if we trust the tsc (Glauber Costa) [569603]
+- [virt] Try using new kvm clock msrs (Glauber Costa) [569603]
+- [virt] Add a global synchronization point for pvclock (Glauber Costa) [569603]
+- [virt] Enable pvclock flags in vcpu_time_info structure (Glauber Costa) [569603]
+- [virt] Tell the guest we'll warn it about tsc stability (Glauber Costa) [592296]
+- [virt] export paravirtual cpuid flags in KVM_GET_SUPPORTED_CPUID (Glauber Costa) [592296]
+- [virt] add new KVMCLOCK cpuid feature (Glauber Costa) [592296]
+- [virt] change msr numbers for kvmclock (Glauber Costa) [592296]
+- [scsi] enclosure: fix oops while iterating enclosure_status array (Stanislaw Gruszka) [580062]
+- [usb] fix bitmask merge error (Stanislaw Gruszka) [580062]
+- [acpi] enable C2 and Turbo-mode on Nehalem notebooks on A/C (Stanislaw Gruszka) [580063]
+- [input] i8042: add Gigabyte M1022M to the noloop list (Stanislaw Gruszka) [580063]
+- [kernel] nohz: Prevent clocksource wrapping during idle (Stanislaw Gruszka) [580063]
+- [kernel] sched: Fix missing sched tunable recalculation on cpu add/remove (Stanislaw Gruszka) [580063]
+- [netdrv] atl1c: use common_task instead of reset_task and link_chg_task (Stanislaw Gruszka) [580063]
+- [netdrv] atl1e: disable NETIF_F_TSO6 for hardware limit (Stanislaw Gruszka) [580063]
+- [kernel] driver-core: fix devtmpfs crash on s390 (Stanislaw Gruszka) [580063]
+- [kernel] devtmpfs: set root directory mode to 0755 (Stanislaw Gruszka) [580063]
+- [input] ALPS: add interleaved protocol support for Dell E6x00 series (Stanislaw Gruszka) [580063]
+- [mm] flush dcache before writing into page to avoid alias (Stanislaw Gruszka) [580064]
+- [block] pktcdvd: removing device does not remove its sysfs dir (Stanislaw Gruszka) [580064]
+- [mm] add new 'read_cache_page_gfp()' helper function (Stanislaw Gruszka) [580064]
+- [acpi] Add NULL pointer check in acpi_bus_start (Stanislaw Gruszka) [580065]
+- [usb] usbfs: only copy the actual data received (Stanislaw Gruszka) [580065]
+- [net] netfilter: xtables: compat out of scope fix (Stanislaw Gruszka) [580065]
+- [net] pktgen: Fix freezing problem (Stanislaw Gruszka) [580065]
+
+* Thu May 13 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-26.el6]
+- [scsi] Sync fcoe to upsteam (Mike Christie) [590781]
+- [netdrv] bnx2x: fix memory barrier (Stanislaw Gruszka) [580477]
+- [x86] kprobes: fix removed int3 checking order (Dave Anderson) [585400]
+- [net] fix oops at bootime in sysctl code (Stanislaw Gruszka) [580064]
+- [net] af_packet: Don't use skb after dev_queue_xmit() (Stanislaw Gruszka) [580064]
+- [net] restore ip source validation (Stanislaw Gruszka) [580064]
+- [net] tcp: update the netstamp_needed counter when cloning sockets (Stanislaw Gruszka) [580064]
+- [net] icmp: send fragment reassembly timeout w/ conntrack enabled (Neil Horman) [563175]
+- [fs] GFS2: stuck in inode wait, no glocks stuck (Robert S Peterson) [583737]
+- [mm] compcache: Backport compcache: ramzswap documentation (Jerome Marchand) [578641]
+- [mm] compcache: xvmalloc memory allocator (Jerome Marchand) [578641]
+- [mm] compcache: virtual block device driver (ramzswap) (Jerome Marchand) [578641]
+- [mm] readahead: fix NULL filp dereference (Josef Bacik) [591055]
+- [netdrv] tg3: 57780 and 5785 devices refuse to attach (Andy Gospodarek) [564117]
+- [x86] Fetch valid frequencies for powernow_k8.o from ACPI _PST table (Bhavna Sarathy) [464630]
+- [s390x] ptrace: fix return value of do_syscall_trace_enter() (Hendrik Brueckner) [588216]
+- [fs] gfs2: fix oops while copying from ext3 to gfs2 (Abhijith Das) [586009] {CVE-2010-1436}
+- [virt] virtio: console: Accept console size along with resize control message (Amit Shah) [589307]
+- [virt] virtio: console: Store each console's size in the console structure (Amit Shah) [589307]
+- [virt] virtio: console: Resize console port 0 on config intr only if multiport is off (Amit Shah) [589307]
+- [sound] ac97: Add IBM ThinkPad R40e to Headphone/Line Jack Sense blacklist (Stanislaw Gruszka) [584757]
+- [sound] ac97: Add Toshiba P500 to ac97 jack sense blacklist (Stanislaw Gruszka) [584757]
+- [x86] amd: Restrict usage of c1e_idle() (Stanislaw Gruszka) [584757]
+- [x86] Fix placement of FIX_OHCI1394_BASE (Stanislaw Gruszka) [584757]
+- [net] netfilter: xt_recent: fix regression in rules using a zero hit_count (Stanislaw Gruszka) [584757]
+- [kernel] softlockup: Stop spurious softlockup messages due to overflow (Stanislaw Gruszka) [584757]
+- [kernel] cpuset: fix the problem that cpuset_mem_spread_node() returns an offline node (Stanislaw Gruszka) [584757]
+- [pci] cleanup error return for pcix get and set mmrbc functions (Stanislaw Gruszka) [584757]
+- [pci] fix access of PCI_X_CMD by pcix get and set mmrbc functions (Stanislaw Gruszka) [584757]
+- [pci] fix return value from pcix_get_max_mmrbc() (Stanislaw Gruszka) [584757]
+- [net] if_tunnel.h: add missing ams/byteorder.h include (Stanislaw Gruszka) [584757]
+- [netdrv] jme: Protect vlgrp structure by pause RX actions (Stanislaw Gruszka) [584757]
+- [netdrv] jme: Fix VLAN memory leak (Stanislaw Gruszka) [584757]
+- [usb] option: add support for a new CMOTECH device to usb/serial/option (Stanislaw Gruszka) [584757]
+- [usb] option: move hardcoded PID to a macro in usb/serial/option (Stanislaw Gruszka) [584757]
+- [usb] option: fix incorrect manufacturer name in usb/serial/option: MAXON->CMOTECH (Stanislaw Gruszka) [584757]
+- [usb] xHCI: re-initialize cmd_completion (Stanislaw Gruszka) [584757]
+- [usb] EHCI: adjust ehci_iso_stream for changes in ehci_qh (Stanislaw Gruszka) [584757]
+- [usb] EHCI: fix ITD list order (Stanislaw Gruszka) [584757]
+- [tty] Take a 256 byte padding into account when buffering below sub-page units (Stanislaw Gruszka) [584757]
+- [tty] Keep the default buffering to sub-page units (Stanislaw Gruszka) [584757]
+- [mm] tmpfs: cleanup mpol_parse_str() (Stanislaw Gruszka) [584757]
+- [perf] Make the install relative to DESTDIR if specified (Stanislaw Gruszka) [584757]
+- [perf] perf_event: Fix oops triggered by cpu offline/online (Stanislaw Gruszka) [584757]
+- [isdn] gigaset: prune use of tty_buffer_request_room (Stanislaw Gruszka) [584757]
+- [isdn] gigaset: correct clearing of at_state strings on RING (Stanislaw Gruszka) [584757]
+- [sound] hda: Disable MSI for Nvidia controller (Stanislaw Gruszka) [584757]
+- [sound] hda: Fix 0 dB offset for HP laptops using CX20551 (Stanislaw Gruszka) [584757]
+- [sound] hda: Fix secondary ADC of ALC260 basic model (Stanislaw Gruszka) [584757]
+- [virt] virtio: fix out of range array access (Stanislaw Gruszka) [584757]
+- [ipc] mqueue: fix mq_open() file descriptor leak on user-space processes (Stanislaw Gruszka) [584757]
+- [security] sysctl: require CAP_SYS_RAWIO to set mmap_min_addr (Stanislaw Gruszka) [584757]
+- [kernel] sched: Mark boot-cpu active before smp_init() (Stanislaw Gruszka) [584757]
+- [pci] add support for 82576NS serdes to existing SR-IOV quirk (Stanislaw Gruszka) [584757]
+- [v4l] DVB: em28xx-dvb: fix memleak in dvb_fini() (Stanislaw Gruszka) [584757]
+- [pci] unconditionally clear AER uncorr status register during cleanup (Stanislaw Gruszka) [584757]
+- [tracing] Do not record user stack trace from NMI context (Stanislaw Gruszka) [584757]
+- [tracing] Disable buffer switching when starting or stopping trace (Stanislaw Gruszka) [584757]
+- [tracing] Use same local variable when resetting the ring buffer (Stanislaw Gruszka) [584757]
+- [tracing] function-graph: Init curr_ret_stack with ret_stack (Stanislaw Gruszka) [584757]
+- [tracing] ring-buffer: Move disabled check into preempt disable section (Stanislaw Gruszka) [584757]
+- [input] i8042: add ALDI/MEDION netbook E1222 to qurik reset table (Stanislaw Gruszka) [584757]
+- [net] netfilter: xt_recent: fix false match (Stanislaw Gruszka) [580067]
+- [net] netfilter: xt_recent: fix buffer overflow (Stanislaw Gruszka) [580067]
+- [tracing] oprofile/x86: fix msr access to reserved counters (Stanislaw Gruszka) [580067]
+- [tracing] oprofile/x86: use kzalloc() instead of kmalloc() (Stanislaw Gruszka) [580067]
+- [tracing] oprofile/x86: remove node check in AMD IBS initialization (Stanislaw Gruszka) [580067]
+- [tracing] oprofile: remove tracing build dependency (Stanislaw Gruszka) [580067]
+- [x86] oprofile: fix perfctr nmi reservation for mulitplexing (Stanislaw Gruszka) [580067]
+- [netdrv] via-rhine: Fix scheduling while atomic bugs (Stanislaw Gruszka) [580067]
+- [net] ipv6: conntrack: Add member of user to nf_ct_frag6_queue structure (Stanislaw Gruszka) [580067]
+- [net] Remove bogus IGMPv3 report handling (Stanislaw Gruszka) [580067]
+- [net] sysfs: Use rtnl_trylock in wireless sysfs methods (Stanislaw Gruszka) [580067]
+- [net] Fix sysctl restarts (Stanislaw Gruszka) [580067]
+- [mm] slab: initialize unused alien cache entry as NULL at alloc_alien_cache() (Stanislaw Gruszka) [580067]
+- [v4l] DVB: cxusb: Select all required frontend and tuner modules (Stanislaw Gruszka) [580067]
+- [v4l] dvb: l64781.ko broken with gcc 4.5 (Stanislaw Gruszka) [580067]
+- [v4l] DVB: uvcvideo: Fix controls blacklisting (Stanislaw Gruszka) [580063]
+- [net] netfilter: nf_conntrack: fix hash resizing with namespaces (Stanislaw Gruszka) [580065]
+- [net] netfilter: nf_conntrack: restrict runtime expect hashsize modifications (Stanislaw Gruszka) [580065]
+- [net] netfilter: xtables: fix conntrack match v1 ipt-save output (Stanislaw Gruszka) [580063]
+- [v4l] DVGB: DocBook/media: create links for included sources (Stanislaw Gruszka) [580063]
+- [v4l] DVB: DocBook/media: copy images after building HTML (Stanislaw Gruszka) [580063]
+- [v4l] DVB: dvb-core: fix initialization of feeds list in demux filter (Stanislaw Gruszka) [580065]
+- [dma] ioat: fix infinite timeout checking in ioat2_quiesce (Stanislaw Gruszka) [580065]
+- [v4l] DVB: smsusb: add autodetection support for five additional Hauppauge USB IDs (Stanislaw Gruszka) [580063]
+- [x86] cpufreq: Fix use after free of struct powernow_k8_data (Stanislaw Gruszka) [580065]
+- [regulator] Fix display of null constraints for regulators (Stanislaw Gruszka) [580065]
+
+* Mon May 10 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-25.el6]
+- [fs] exec: Fix 'flush_old_exec()/setup_new_exec()' split (Jiri Olsa) [586024] {CVE-2010-0307}
+- [powerpc] TIF_ABI_PENDING bit removal (Jiri Olsa) [586024] {CVE-2010-0307}
+- [x86] set_personality_ia32() misses force_personality32 (Jiri Olsa) [586024] {CVE-2010-0307}
+- [x86] get rid of the TIF_ABI_PENDING bit (Jiri Olsa) [586024] {CVE-2010-0307}
+- [kernel] split 'flush_old_exec' into two functions (Jiri Olsa) [586024] {CVE-2010-0307}
+- [net] sctp: fix skb_over_panic from processing too many unknown params (Neil Horman) [584659] {CVE-2010-1173}
+- [virt] kvm: fix vmx null pointer dereference (Eduardo Habkost) [570534] {CVE-2010-0435}
+- [fs] gfs2: fix quota state reporting (Christoph Hellwig) [589945]
+- [fs] gfs2: fix quota file size not a multiple of struct gfs2_quota (Abhijith Das) [589813]
+- [x86] Use physical mode for IBM Summit platforms (John Villalovos) [558397]
+- [mm] page allocator: update NR_FREE_PAGES only when necessary (Stanislaw Gruszka) [579693]
+- [mm] memcg: ensure list is empty at rmdir (Stanislaw Gruszka) [579693]
+- [video] revert "drivers/video/s3c-fb.c: fix clock setting for Samsung SoC Framebuffer" (Stanislaw Gruszka) [579693]
+- [v4l] DVB: gspca - sunplus: Fix bridge exchanges (Stanislaw Gruszka) [580062]
+- [hwmon] fschmd: Fix a memleak on multiple opens of /dev/watchdog (Stanislaw Gruszka) [580063]
+- [sound] hda: Fix HP T5735 automute (Stanislaw Gruszka) [580063]
+- [sound] hda: Fix quirk for Maxdata obook4-1 (Stanislaw Gruszka) [580063]
+- [sound] ice1724: Patch for suspend/resume for ESI Juli@ (Stanislaw Gruszka) [580063]
+- [sound] usb-audio: Avoid Oops after disconnect (Stanislaw Gruszka) [580065]
+- [sound] ctxfi: fix PTP address initialization (Stanislaw Gruszka) [580065]
+- [hwmon] lm78: Request I/O ports individually for probing (Stanislaw Gruszka) [580065]
+- [hwmon] w83781d: Request I/O ports individually for probing (Stanislaw Gruszka) [580065]
+- [hwmon] tmp421: Fix temperature conversions (Stanislaw Gruszka) [580067]
+- [sound] via82xx: add quirk for D1289 motherboard (Stanislaw Gruszka) [580067]
+- [hwmon] tmp421: Restore missing inputs (Stanislaw Gruszka) [580067]
+- [sound] USB MIDI support for Access Music VirusTI (Stanislaw Gruszka) [580067]
+- [sound] hda-intel: Add position_fix quirk for ASUS M2V-MX SE (Stanislaw Gruszka) [580067]
+- [sound] pcm core: fix fifo_size channels interval check (Stanislaw Gruszka) [580067]
+- [sound] hda: Use 3stack quirk for Toshiba Satellite L40-10Q (Stanislaw Gruszka) [580067]
+- [bluetooth] Fix potential bad memory access with sysfs files (Stanislaw Gruszka) [584757]
+- [hwmon] coretemp: Add missing newline to dev_warn() message (Stanislaw Gruszka) [584757]
+- [bluetooth] Fix kernel crash on L2CAP stress tests (Stanislaw Gruszka) [584757]
+- [input] wacom: ensure the device is initialized properly upon resume (Stanislaw Gruszka) [584757]
+- [sound] hda: Fix input source elements of secondary ADCs on Realtek (Stanislaw Gruszka) [584757]
+- [x86] nmi watchdog: use generic interrupt source to determine deadlocks (Don Zickus) [574570]
+- [dm] eliminate some holes in data structures (Mike Snitzer) [586089]
+- [dm] ioctl: introduce flag indicating uevent was generated (Mike Snitzer) [586089]
+- [dm] free dm_io before bio_endio not after (Mike Snitzer) [586089]
+- [dm] table: remove unused dm_get_device range parameters (Mike Snitzer) [586089]
+- [dm] ioctl: only issue uevent on resume if state changed (Mike Snitzer) [586089]
+- [dm] raid1: always return error if all legs fail (Mike Snitzer) [586089]
+- [dm] mpath: refactor pg_init (Mike Snitzer) [586089]
+- [dm] mpath: wait for pg_init completion when suspending (Mike Snitzer) [586089]
+- [dm] mpath: hold io until all pg_inits completed (Mike Snitzer) [586089]
+- [dm] mpath: avoid storing private suspended state (Mike Snitzer) [586089]
+- [dm] document when snapshot has finished merging (Mike Snitzer) [586089]
+- [dm] table: remove dm_get from dm_table_get_md (Mike Snitzer) [586089]
+- [dm] mpath: skip activate_path for failed paths (Mike Snitzer) [586089]
+- [dm] mpath: pass struct pgpath to pg init done (Mike Snitzer) [586089]
+- [netdrv] mac80211: fix deferred hardware scan requests (John Linville) [561762]
+- [x86] asus-laptop: add Lenovo SL hotkey support (Stanislaw Gruszka) [579693]
+- [input] pmouse: move Sentelic probe down the list (Stanislaw Gruszka) [579693]
+- [pci] cardbus: Add a fixup hook and fix powerpc (Stanislaw Gruszka) [579693]
+- [mfd] Correct WM835x ISINK ramp time defines (Stanislaw Gruszka) [579693]
+- [mfd] WM835x GPIO direction register is not locked (Stanislaw Gruszka) [579693]
+- [edac] i5000_edac critical fix panic out of bounds (Stanislaw Gruszka) [579693]
+- [i2c] i2c-tiny-usb: Fix on big-endian systems (Stanislaw Gruszka) [580065]
+- [x86] thinkpad-acpi: fix bluetooth/wwan resume (Stanislaw Gruszka) [580067]
+- [v4l] DVB: bttv: Move I2C IR initialization (Stanislaw Gruszka) [580067]
+- [bluetooth] Fix sleeping function in RFCOMM within invalid context (Stanislaw Gruszka) [584757]
+- [i2c] i2c-i801: Don't use the block buffer for I2C block writes (Stanislaw Gruszka) [584757]
+- [s390x] vdso: use ntp adjusted clock multiplier (Hendrik Brueckner) [575728]
+- [s390x] timekeeping: Fix clock_gettime vsyscall time warp (Hendrik Brueckner) [575728]
+- [s390x] timekeeping: Fix accumulation bug triggered by long delay (Hendrik Brueckner) [575728]
+- [netdrv] igb: fix warning in drivers/net/igb/igb_main.c (Stefan Assmann) [589272]
+- [x86] Re-get cfg_new in case reuse/move irq_desc (Stanislaw Gruszka) [580065 583555]
+- [hwmon] adt7462: fix wrong ADT7462_VOLT_COUNT (Stanislaw Gruszka) [580065]
+- [fs] exec.c: fix initial stack reservation (Stanislaw Gruszka) [580067]
+- [fs] exec.c: restrict initial stack space expansion to rlimit (Stanislaw Gruszka) [580065]
+- [kernel] resource: add helpers for fetching rlimits (Stanislaw Gruszka) [580065]
+- [tracing] ext4: Convert some events to DEFINE_EVENT (Mike Snitzer) [588108]
+- [tracing] Convert some jbd2 events to DEFINE_EVENT (Mike Snitzer) [588108]
+- [tracing] Convert some block events to DEFINE_EVENT (Mike Snitzer) [588108]
+- [tracing] Convert some power events to DEFINE_EVENT (Mike Snitzer) [588108]
+- [tracing] Convert some workqueue events to DEFINE_EVENT (Mike Snitzer) [588108]
+- [tracing] Convert softirq events to DEFINE_EVENT (Mike Snitzer) [588108]
+- [tracing] Convert some kmem events to DEFINE_EVENT (Mike Snitzer) [588108]
+- [tracing] Convert module refcnt events to DEFINE_EVENT (Mike Snitzer) [588108]
+- [tracing] xfs: use DECLARE_EVENT_CLASS (Mike Snitzer) [588108]
+- [tracing] Harmonize event field names and print output names (Mike Snitzer) [588108]
+- [tracing] Add DEFINE_EVENT(), DEFINE_SINGLE_EVENT() support to docbook (Mike Snitzer) [588108]
+- [block] blk-cgroup: config options re-arrangement (Vivek Goyal) [586182]
+- [block] blkio: Fix another BUG_ON() crash due to cfqq movement across groups (Vivek Goyal) [586182]
+- [block] blkio: Fix blkio crash during rq stat update (Vivek Goyal) [586182]
+- [block] blkio: Initialize blkg->stats_lock for the root cfqg too (Vivek Goyal) [586182]
+- [block] blkio: Fix compile errors (Vivek Goyal) [586182]
+- [block] Update to io-controller stats (Vivek Goyal) [586182]
+- [block] io-controller: Add a new interface "weight_device" for IO-Controller (Vivek Goyal) [586182]
+- [block] cfq-iosched: Fix the incorrect timeslice accounting with forced_dispatch (Vivek Goyal) [586182]
+- [block] blkio: Add more debug-only per-cgroup stats (Vivek Goyal) [586182]
+- [block] blkio: Add io_queued and avg_queue_size stats (Vivek Goyal) [586182]
+- [block] blkio: Add io_merged stat (Vivek Goyal) [586182]
+- [block] blkio: Changes to IO controller additional stats patches (Vivek Goyal) [586182]
+- [block] expose the statistics in blkio.time and blkio.sectors for the root cgroup (Vivek Goyal) [586182]
+- [block] blkio: Increment the blkio cgroup stats for real now (Vivek Goyal) [586182]
+- [block] blkio: Add io controller stats like (Vivek Goyal) [586182]
+- [block] blkio: Remove per-cfqq nr_sectors as we'll be passing (Vivek Goyal) [586182]
+- [block] cfq-iosched: Add additional blktrace log messages in CFQ for easier debugging (Vivek Goyal) [586182]
+- [block] cfq-iosched: requests "in flight" vs "in driver" clarification (Vivek Goyal) [586182]
+- [ppc] cxgb3: Wait longer for control packets on initialization (Steve Best) [588848]
+- [virt] KVM: convert ioapic lock to spinlock (Marcelo Tosatti) [588811]
+- [virt] KVM: fix the handling of dirty bitmaps to avoid overflows (Marcelo Tosatti) [588811]
+- [virt] KVM: MMU: fix kvm_mmu_zap_page() and its calling path (Marcelo Tosatti) [588811]
+- [virt] KVM: VMX: Save/restore rflags.vm correctly in real mode (Marcelo Tosatti) [588811]
+- [virt] KVM: Dont spam kernel log when injecting exceptions due to bad cr writes (Marcelo Tosatti) [588811]
+- [virt] KVM: SVM: Fix memory leaks that happen when svm_create_vcpu() fails (Marcelo Tosatti) [588811]
+- [virt] KVM: VMX: Update instruction length on intercepted BP (Marcelo Tosatti) [588811]
+- [drm] nouveau: initial eDP support + additional fixes (Ben Skeggs) [588581]
+- [s390x] zcore: Fix reipl device detection (Hendrik Brueckner) [587025]
+- [connector] Delete buggy notification code (Stanislaw Gruszka) [580064 586025] {CVE-2010-0410}
+- [netdrv] ath9k: fix beacon slot/buffer leak (Stanislaw Gruszka) [580064]
+- [fusion] mptsas: Fix issue with chain pools allocation on katmai (Stanislaw Gruszka) [580064]
+- [sunrpc] Fix a potential memory leak in auth_gss (Stanislaw Gruszka) [584757]
+- [tracing] scsi: Enhance SCSI command tracing (Mike Snitzer) [588108]
+- [tracing] scsi: Add missing verify command definitions (Mike Snitzer) [588108]
+- [tracing] scsi: ftrace based SCSI command tracing (Mike Snitzer) [588108]
+- [tracing] add __print_hex() (Mike Snitzer) [588108]
+- [tracing] Add notrace to TRACE_EVENT implementation functions (Mike Snitzer) [588108]
+- [tracing] Move a printk out of ftrace_raw_reg_event_foo() (Mike Snitzer) [588108]
+- [tracing] Rename TRACE_EVENT_TEMPLATE() to DECLARE_EVENT_CLASS() (Mike Snitzer) [588108]
+- [tracing] Convert some sched trace events to DEFINE_EVENT and _PRINT (Mike Snitzer) [588108]
+- [tracing] Create new DEFINE_EVENT_PRINT (Mike Snitzer) [588108]
+- [tracing] Create new TRACE_EVENT_TEMPLATE (Mike Snitzer) [588108]
+- [tracing] additional interface changes and fixes (Mike Snitzer) [588108]
+- [tracing] Ftrace dynamic ftrace_event_call support (Mike Snitzer) [588108]
+- [fs] quota: fix WARN_ON when quota reservations get out of sync (Eric Sandeen) [581951]
+- [scsi] fcoe: sync with upstream (Mike Christie) [577049 578328]
+
+* Mon May 03 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-24.el6]
+- [fs] ecryptfs: disallow ecryptfs as underlying filesystem (Eric Sandeen) [585185]
+- [mm] Fix Section Mismatch warning in put_page_bootmem() (Prarit Bhargava) [587040]
+- [mm] transparent hugepage support update (Andrea Arcangeli) [556572]
+- [netdrv] ath9k: revert fb6635f6c114313f246cc34abc0b677264a765ed (Aristeu Rozanski) [584757]
+- [virt] KVM: take srcu lock before call to complete_pio() (Gleb Natapov) [585887]
+- [virt] virtio: Fix GFP flags passed from the virtio balloon driver (Amit Shah) [584680]
+- [x86] Check chip_data value in irq_force_complete_move() (Prarit Bhargava) [564398]
+- [x86] nmi_watchdog: use __cpuinit for 32-bit nmi_watchdog_default (Prarit Bhargava) [586967]
+- [acpi] Fall back to manually changing SCI_EN (Matthew Garrett) [587008]
+- [pci] Ensure that devices are resumed properly (Matthew Garrett) [586780]
+- [serial] usb-serial: Rework and update qcserial (Matthew Garrett) [587009]
+- [scsi] scsi_lib: Fix bug in completion of bidi commands (Stanislaw Gruszka) [580064]
+- [net] phonet: add check for null pernet mem pointer in notifier (Jiri Pirko) [573122]
+- [nfs] Ensure that writeback_single_inode() calls write_inode() when syncing (Jeff Layton) [584382]
+- [serial] 8250_pnp: use wildcard for serial Wacom tablets (Stanislaw Gruszka) [580062]
+- [fs] ext4: check s_log_groups_per_flex in online resize code (Eric Sandeen) [519461]
+- [x86] Fix sched_clock_cpu for systems with unsynchronized TSC (Prarit Bhargava) [568344]
+- [x86] Reenable TSC sync check at boot, even with NONSTOP_TSC (Prarit Bhargava) [568344]
+- [mm] slab: add memory hotplug support (Prarit Bhargava) [562880]
+- [x86] Set hotpluggable nodes in nodes_possible_map (Prarit Bhargava) [568344]
+- [x86] acpi: Auto Online Hot-Added Memory (Prarit Bhargava) [568344]
+- [mm] memory hotplug: fix a bug on /dev/mem for 64-bit kernels (Prarit Bhargava) [568344]
+- [mm] update all PGDs for direct mapping changes on 64 bit (Prarit Bhargava) [568344]
+- [x86] acpi: Map hotadded cpu to correct node (Prarit Bhargava) [568344]
+- [ipmi] Change timeout and event poll to one second (Matthew Garrett) [584106]
+- [ipmi] Attempt to register multiple SIs of the same type (Matthew Garrett) [584106]
+- [ipmi] Reduce polling (Matthew Garrett) [584106]
+- [ipmi] Reduce polling when interrupts are available (Matthew Garrett) [584106]
+- [ipmi] Change device discovery order (Matthew Garrett) [584106]
+- [ipmi] Only register one si per bmc (Matthew Garrett) [584106]
+- [ipmi] Split device discovery and registration (Matthew Garrett) [584106]
+- [ipmi] Change addr_source to an enum rather than strings (Matthew Garrett) [584106]
+- [drm] radeon: rs780/rs880: MSI quirk fixes (Dave Airlie) [586168]
+- [drm] radeon/kms: MC + watermark fixes + reset (Dave Airlie) [586168]
+- [drm] radeon/kms/evergreen: add evergreen stage 2 - HPD irq (Dave Airlie) [580757]
+- [drm] radeon: fixup radeon_asic struct c/h files (Dave Airlie) [586168]
+- [drm] radeon/kms: misc + tv dac fixes (Dave Airlie) [586168]
+- [drm] radeon/kms: squash upstream HDMI audio commits (Dave Airlie) [586168]
+- [drm] kms/radeon: Integrated graphics fixes (Dave Airlie) [586168]
+- [drm] radeon/kms: spread spectrum + pll fixes (Dave Airlie) [586168]
+- [drm] radeon: add initial evergreen support + fixes (Dave Airlie) [580757]
+- [kernel] tty: tty->pgrp races (Jiri Olsa) [586022]
+- [netdrv] kernel: fix the r8169 frame length check error (Jiri Olsa) [586017] {CVE-2009-4537}
+
+* Tue Apr 27 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-23.el6]
+- [doc] add the documentation for mpol=local (Stanislaw Gruszka) [584757]
+- [fs] tmpfs: handle MPOL_LOCAL mount option properly (Stanislaw Gruszka) [584757]
+- [fs] tmpfs: mpol=bind:0 don't cause mount error (Stanislaw Gruszka) [584757]
+- [netdrv] tun: orphan an skb on tx (Michael S. Tsirkin) [584428]
+- [s390x] vmalloc: IPL failure with enabled memory cgroups (Hendrik Brueckner) [580918]
+- [netdrv] b43: fall back gracefully to PIO mode after fatal DMA errors (John Linville) [583069]
+- [netdrv] b43: Allow PIO mode to be selected at module load (John Linville) [583069]
+- [netdrv] b43: Remove reset after fatal DMA error (John Linville) [583069]
+- [netdrv] b43: Optimize PIO scratchbuffer usage (John Linville) [583069]
+- [fs] vfs: get_sb_single() - do not pass options twice (Stanislaw Gruszka) [580063]
+- [fs] tmpfs: fix oops on mounts with mpol=default (Stanislaw Gruszka) [584757]
+- [kernel] cred.c: use kmem_cache_free (Stanislaw Gruszka) [580064]
+- [fs] partition/msdos: fix unusable extended partition for > 512B sector (Stanislaw Gruszka) [584757]
+- [fs] partitions/msdos: add support for large disks (Stanislaw Gruszka) [584757]
+- [fs] eCryptfs: Add getattr function (Stanislaw Gruszka) [580065]
+- [fs] ecryptfs: initialize private persistent file before dereferencing pointer (Stanislaw Gruszka) [580062]
+- [fs] ecryptfs: use after free (Stanislaw Gruszka) [580062]
+- [ppc] Track backing pages used allocated by vmemmap_populate() (Steve Best) [547854]
+- [netdrv] be2net: recent bug fixes from upstream (Ivan Vecera) [583766]
+- [sunrpc] handle allocation errors from __rpc_lookup_create() (Stanislaw Gruszka) [584757]
+- [nfs] Prevent another deadlock in nfs_release_page() (Stanislaw Gruszka) [584757]
+- [nfs] NFSv4: Don't ignore the NFS_INO_REVAL_FORCED flag in nfs_revalidate_inode() (Stanislaw Gruszka) [584757]
+- [nfs] Fix an allocation-under-spinlock bug (Stanislaw Gruszka) [580067]
+- [sunrpc] Handle EINVAL error returns from the TCP connect operation (Stanislaw Gruszka) [580067]
+- [sunrpc] remove unnecessary svc_xprt_put (Stanislaw Gruszka) [580067]
+- [x86] Add iMac9,1 to pci_reboot_dmi_table (Stanislaw Gruszka) [580067]
+- [rtc] rtc-core: fix memory leak (Stanislaw Gruszka) [580067]
+- [mm] readahead: introduce FMODE_RANDOM for POSIX_FADV_RANDOM (Stanislaw Gruszka) [580067]
+- [fs] fix LOOKUP_FOLLOW on automount "symlinks" (Stanislaw Gruszka) [580067]
+- [nfs] Too many GETATTR and ACCESS calls after direct I/O (Stanislaw Gruszka) [580065]
+- [virt] kvmclock: count total_sleep_time when updating guest clock (Stanislaw Gruszka) [580065]
+- [kernel] Export the symbol of getboottime and mmonotonic_to_bootbased (Stanislaw Gruszka) [580065]
+- [nfs] NFS: Fix the mapping of the NFSERR_SERVERFAULT error (Stanislaw Gruszka) [580065]
+- [nfs] NFS: Fix a umount race (Stanislaw Gruszka) [580065]
+- [x86] amd-iommu: Fix possible integer overflow (Stanislaw Gruszka) [580064]
+- [ata] libata: retry FS IOs even if it has failed with AC_ERR_INVALID (Stanislaw Gruszka) [580064]
+- [firewire] firewire: ohci: fix crashes with TSB43AB23 on 64bit systems (Stanislaw Gruszka) [580064]
+- [ata] pata_hpt3x2n: always stretch UltraDMA timing (Stanislaw Gruszka) [580067]
+- [cgroup] memcg: fix oom killing a child process in an other cgroup (Stanislaw Gruszka) [580067]
+- [ata] libata: retry link resume if necessary (Stanislaw Gruszka) [580064]
+- [firewire] core: add_descriptor size check (Stanislaw Gruszka) [580064]
+- [netdrv] iwlwifi: fix scan race (Stanislaw Gruszka) [584759]
+- [netdrv] iwlwifi: clear all tx queues when firmware ready (Stanislaw Gruszka) [584759]
+- [netdrv] iwlwifi: need check for valid qos packet before free (Stanislaw Gruszka) [584759]
+- [netdrv] mac80211: tear down all agg queues when restart/reconfig hw (Stanislaw Gruszka) [584759]
+- [netdrv] mac80211: move netdev queue enabling to correct spot (Stanislaw Gruszka) [584759]
+- [netdrv] setup correct int pipe type in ar9170_usb_exec_cmd (Stanislaw Gruszka) [584759]
+- [netdrv] iwlwifi: range checking issue (Stanislaw Gruszka) [584759]
+- [netdrv] iwlwifi: fix nfreed-- (Stanislaw Gruszka) [584759]
+- [netdrv] iwlwifi: counting number of tfds can be free for 4965 (Stanislaw Gruszka) [584759]
+- [netdrv] b43: Workaround circular locking in hw-tkip key update callback (Stanislaw Gruszka) [584757]
+- [ata] ahci: use BIOS date in broken_suspend list (Stanislaw Gruszka) [584757]
+- [netdrv] mac80211: Reset dynamic ps timer in Rx path (Stanislaw Gruszka) [584757]
+- [netdrv] ath9k: Enable IEEE80211_HW_REPORTS_TX_ACK_STATUS flag for ath9k (Stanislaw Gruszka) [584757]
+- [netdrv] mac80211: Retry null data frame for power save (Stanislaw Gruszka) [584757]
+- [netdrv] ath9k: Enable TIM timer interrupt only when needed. (Stanislaw Gruszka) [584757]
+- [netdrv] ath9k: fix BUG_ON triggered by PAE frames (Stanislaw Gruszka) [584757]
+- [netdrv] iwlwifi: Silence tfds_in_queue message (Stanislaw Gruszka) [584757]
+- [netdrv] iwlwifi: use dma_alloc_coherent (Stanislaw Gruszka) [584757]
+- [netdrv] wl1251: fix potential crash (Stanislaw Gruszka) [584757]
+- [block] readahead: add blk_run_backing_dev (Stanislaw Gruszka) [584757]
+- [netdrv] ath9k: fix lockdep warning when unloading module (Stanislaw Gruszka) [584757]
+- [scsi] mvsas: add support for Adaptec ASC-1045/1405 SAS/SATA HBA (Stanislaw Gruszka) [584757]
+- [netdrv] ath5k: fix setup for CAB queue (Stanislaw Gruszka) [584757]
+- [netdrv] ath5k: dont use external sleep clock in AP mode (Stanislaw Gruszka) [584757]
+- [netdrv] tg3: Fix tg3_poll_controller() passing wrong pointer to tg3_interrupt() (Stanislaw Gruszka) [584757]
+- [netdrv] b43/b43legacy: Wake queues in wireless_core_start (Stanislaw Gruszka) [580067]
+- [netdrv] ath5k: use correct packet type when transmitting (Stanislaw Gruszka) [580067]
+- [netdrv] ath9k: disable RIFS search for AR91xx based chips (Stanislaw Gruszka) [580067]
+- [netdrv] ath9k: fix rate control fallback rate selection (Stanislaw Gruszka) [580067]
+- [netdrv] ath9k: fix beacon timer restart after a card reset (Stanislaw Gruszka) [580067]
+- [netdrv] p54usb: Add the USB ID for Belkin (Accton) FD7050E ver 1010ec (Stanislaw Gruszka) [580067]
+- [netdrv] rndis_wlan: disable stall workaround (Stanislaw Gruszka) [580067]
+- [netdrv] rndis_wlan: fix buffer overflow in rndis_query_oid (Stanislaw Gruszka) [580067]
+- [netdrv] rndis_wlan: handle NL80211_AUTHTYPE_AUTOMATIC (Stanislaw Gruszka) [580067]
+- [netdrv] sky2: fix transmit DMA map leakage (Stanislaw Gruszka) [580067]
+- [netdrv] airo: fix setting zero length WEP key (Stanislaw Gruszka) [580067]
+- [netdrv] mac80211: quit addba_resp_timer if Tx BA session is torn down (Stanislaw Gruszka) [580067]
+- [netdrv] iwlwifi: sanity check before counting number of tfds can be free (Stanislaw Gruszka) [580067]
+- [netdrv] iwlwifi: set HT flags after channel in rxon (Stanislaw Gruszka) [580067]
+- [netdrv] iwlwifi: error checking for number of tfds in queue (Stanislaw Gruszka) [580067]
+- [netdrv] iwlwifi: Fix to set correct ht configuration (Stanislaw Gruszka) [580065]
+- [netdrv] mac80211: Fix probe request filtering in IBSS mode (Stanislaw Gruszka) [580065]
+- [netdrv] ath9k: Fix sequence numbers for PAE frames (Stanislaw Gruszka) [580065]
+- [netdrv] b43: Fix throughput regression (Stanislaw Gruszka) [580065]
+- [netdrv] rtl8187: Add new device ID (Stanislaw Gruszka) [580065]
+- [ata] ahci: add Acer G725 to broken suspend list (Stanislaw Gruszka) [580065]
+- [scsi] mptfusion: mptscsih_abort return value should be SUCCESS instead of value 0 (Stanislaw Gruszka) [580065]
+- [nfs] Fix an Oops when truncating a file (Stanislaw Gruszka) [580065]
+- [block] cciss: Make cciss_seq_show handle holes in the h->drv[] array (Stanislaw Gruszka) [580065]
+- [netdrv] ath9k: fix eeprom INI values override for 2GHz-only cards (Stanislaw Gruszka) [580064]
+- [netdrv] mac80211: fix NULL pointer dereference when ftrace is enabled (Stanislaw Gruszka) [580064]
+- [block] fix bugs in bio-integrity mempool usage (Stanislaw Gruszka) [580064]
+- [netdrv] sky2: Fix oops in sky2_xmit_frame() after TX timeout (Stanislaw Gruszka) [580064]
+- [netdrv] iwlwifi: set default aggregation frame count limit to 31 (Stanislaw Gruszka) [580064]
+- [netdrv] e1000/e1000e: don't use small hardware rx buffers (Stanislaw Gruszka) [580064]
+- [netdrv] e1000: enhance frame fragment detection (Stanislaw Gruszka) [580064]
+- [mm] rmap: anon_vma_prepare() can leak anon_vma_chain (Rik van Riel) [579936]
+- [mm] rmap: add exclusively owned pages to the newest anon_vma (Rik van Riel) [579936]
+- [mm] anonvma: when setting up page->mapping, we need to pick the _oldest_ anonvma (Rik van Riel) [579936]
+- [mm] anon_vma: clone the anon_vma chain in the right order (Rik van Riel) [579936]
+- [mm] vma_adjust: fix the copying of anon_vma chains (Rik van Riel) [579936]
+- [mm] Simplify and comment on anon_vma re-use for anon_vma_prepare() (Rik van Riel) [579936]
+- [mm] rmap: fix anon_vma_fork() memory leak (Rik van Riel) [579936]
+- [s390x] nss: add missing .previous statement to asm function (Hendrik Brueckner) [581521]
+- [ata] pata_mavell: correct check of AHCI config option (David Milburn) [584483]
+- [fs] ext4: Issue the discard operation before releasing the blocks (Eric Sandeen) [575884]
+- [scsi] 3w_sas: new driver (Tomas Henzl) [572781]
+- [kernel] hrtimer: Tune hrtimer_interrupt hang logic (Marcelo Tosatti) [576355]
+
+* Tue Apr 20 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-22.el6]
+- [netdrv] b43: ssb: do not read SPROM if it does not exist (John Linville) [574895]
+- [netdrv] igb: add support for Intel I350 Gigabit Network Connection (Stefan Assmann) [580727]
+- [kernel] exec: refactor how usermodehelpers work and modify core_pipe recursion check (Neil Horman) [557387]
+- [kernel] re-export page_is_ram() for crash module (Prarit Bhargava) [583032]
+- [x86] amd_iommu: allow iommu to complete dma transactions during transition to kdump kernel (Neil Horman) [577788]
+- [nfs] rsize and wsize settings ignored on v4 mounts (Steve Dickson) [582697]
+- [net] igmp: fix ip_mc_sf_allow race (Flavio Leitner) [578932]
+- [net] Remove skb_dma_map/unmap calls from drivers (Thomas Graf) [576690]
+- [scsi] mpt2sas: IOs needs to be pause until handles are refreshed for all device after recovery (Tomas Henzl) [577909]
+- [scsi] mpt2sas: Reworked scmd->result priority for _scsih_qcmd (Tomas Henzl) [577909]
+- [x86] Suppress stack overrun message for init_task (Prarit Bhargava) [582625]
+- [sunrpc] gss_krb5: Advertise rc4-hmac enctype support in the rpcsec_gss/krb5 upcall (Steve Dickson) [498317]
+- [sunrpc] gss_krb5: Add support for rc4-hmac encryption (Steve Dickson) [498317]
+- [sunrpc] gss_krb5: Use confounder length in wrap code (Steve Dickson) [498317]
+- [sunrpc] gssd_krb5: More arcfour-hmac support (Steve Dickson) [498317]
+- [sunrpc] gss_krb5: Save the raw session key in the context (Steve Dickson) [498317]
+- [sunrpc] gssd_krb5: arcfour-hmac support (Steve Dickson) [498317]
+- [sunrpc] gss_krb5: Advertise AES enctype support in the rpcsec_gss/krb5 upcall (Steve Dickson) [498317]
+- [sunrpc] gss_krb5: add remaining pieces to enable AES encryption support (Steve Dickson) [498317]
+- [sunrpc] gss_krb5: add support for new token formats in rfc4121 (Steve Dickson) [498317]
+- [sunrpc] xdr: Add an export for the helper function write_bytes_to_xdr_buf() (Steve Dickson) [498317]
+- [sunrpc] gss_krb5: Advertise triple-des enctype support in the rpcsec_gss/krb5 upcall (Steve Dickson) [498317]
+- [sunrpc] gss_krb5: add support for triple-des encryption (Steve Dickson) [498317]
+- [sunrpc] gss_krb5: Add upcall info indicating supported kerberos enctypes (Steve Dickson) [498317]
+- [sunrpc] gss_krb5: handle new context format from gssd (Steve Dickson) [498317]
+- [sunrpc] gss_krb5: import functionality to derive keys into the kernel (Steve Dickson) [498317]
+- [sunrpc] gss_krb5: add ability to have a keyed checksum (hmac) (Steve Dickson) [498317]
+- [sunrpc] gss_krb5: introduce encryption type framework (Steve Dickson) [498317]
+- [sunrpc] gss_krb5: prepare for new context format (Steve Dickson) [498317]
+- [sunrpc] gss_krb5: split up functions in preparation of adding new enctypes (Steve Dickson) [498317]
+- [sunrpc] gss_krb5: Don't expect blocksize to always be 8 when calculating padding (Steve Dickson) [498317]
+- [sunrpc] gss_krb5: Added and improved code comments (Steve Dickson) [498317]
+- [sunrpc] gss_krb5: Introduce encryption type framework (Steve Dickson) [498317]
+- [mm] Fix vfree race resulting in kernel bug (Steven Whitehouse) [582522]
+- [ata] libata: fix accesses at LBA28 boundary (David Milburn) [582432]
+- [netdrv] b43: Rewrite DMA Tx status handling sanity checks (John Linville) [574533]
+- [char] tty: release_one_tty() forgets to put pids (Oleg Nesterov) [582077] {CVE-2010-1162}
+- [mm] oom: fix the unsafe usage of badness() in proc_oom_score() (Oleg Nesterov) [582069]
+- [netdrv] bonding: fix broken multicast with round-robin mode (Andy Gospodarek) [581644]
+- [x86] Remove sysfs_attr_init, sysfs_bin_attr_init changes introduced in last MCE patch (Prarit Bhargava) [581659]
+- [kernel] sched_getaffinity: allow less than NR_CPUS length (Oleg Nesterov) [578970]
+- [scsi] bfa sync w/ upstream (Rob Evers) [576716]
+- [gfs] GFS2: Fix ordering of ordered buffers (Steven Whitehouse) [581011]
+- [gfs] GFS2: Don't withdraw on partial rindex entries (Robert S Peterson) [581009]
+- [gfs] GFS2: livelock while reclaiming unlinked dinodes (Robert S Peterson) [570182]
+- [scsi] mpt2sas: Do not reset handle before calling _scsih_remove_device in RESCAN task after HBA RESET (Tomas Henzl) [572646]
+- [scsi] mpt2sas: Device removal algorithm in interrupt ctx (Tomas Henzl) [572646]
+- [scsi] mpt2sas: fix the incorrect scsi_dma_map error checking (Tomas Henzl) [572646]
+- [scsi] Upgrading version to 04.100.01.02 (Tomas Henzl) [572646]
+- [scsi] mpt2sas: modified _scsih_sas_device_find_by_handle/sas_address (Tomas Henzl) [572646]
+- [scsi] mpt2sas: RESCAN Barrier work is added in case of HBA reset (Tomas Henzl) [572646]
+- [scsi] update the version to 04.100.01.00 (Tomas Henzl) [572646]
+- [scsi] scsi_transport_sas: add support for transport layer retries (TLR) (Tomas Henzl) [572646]
+- [scsi] mpt2sas: Added raid transport support (Tomas Henzl) [572646]
+- [scsi] eliminate potential kmalloc failure in scsi_get_vpd_page() (Tomas Henzl) [572646]
+- [ata] libata: fix ata_id_logical_per_physical_sectors (David Milburn) [582021]
+- [netdrv] iwlwifi: Fix throughput stall issue in HT mode for 5000 (Stanislaw Gruszka) [580063]
+- [infiniband] IPoIB: Clear ipoib_neigh.dgid in ipoib_neigh_alloc() (Stanislaw Gruszka) [580063]
+- [net] cfg80211: fix channel setting for wext (Stanislaw Gruszka) [580063]
+- [net] mac80211: check that ieee80211_set_power_mgmt only handles STA interfaces (Stanislaw Gruszka) [580063]
+- [ata] ata_piix: fix MWDMA handling on PIIX3 (Stanislaw Gruszka) [580063]
+- [ata] ahci: disable SNotification capability for ich8 (Stanislaw Gruszka) [580063]
+- [netdrv] ar9170: Add support for D-Link DWA 160 A2 (Stanislaw Gruszka) [580063]
+- [netdrv] sfc: Fix DMA mapping cleanup in case of an error in TSO (Stanislaw Gruszka) [580063]
+- [fs] ext4: don't call write_inode under the journal (Josef Bacik) [576202]
+- [fs] ext4: Calculate metadata requirements more accurately (Josef Bacik) [576202]
+- [fs] ext4: Patch up how we claim metadata blocks for quota purposes (Josef Bacik) [576202]
+- [fs] ext4: fix potential quota deadlock (Josef Bacik) [576202]
+- [virt] virtio: console: Add support for nonblocking write()s (Amit Shah) [576241]
+- [virt] virtio: console: Rename wait_is_over() to will_read_block() (Amit Shah) [576241]
+- [virt] virtio: console: Don't always create a port 0 if using multiport (Amit Shah) [576241]
+- [virt] virtio: console: Use a control message to add ports (Amit Shah) [576241]
+- [virt] virtio: console: Move code around for future patches (Amit Shah) [576241]
+- [virt] virtio: console: Remove config work handler (Amit Shah) [576241]
+- [virt] virtio: console: Don't call hvc_remove() on unplugging console ports (Amit Shah) [576241]
+- [virt] virtio: console: Return -EPIPE to hvc_console if we lost the connection (Amit Shah) [576241]
+- [virt] virtio: console: Let host know of port or device add failures (Amit Shah) [576241]
+- [virt] virtio: console: Add a __send_control_msg() that can send messages without a valid port (Amit Shah) [576241]
+- [virt] hvc_console: Fix race between hvc_close and hvc_remove (Amit Shah) [577222]
+- [virt] virtio: console makes incorrect assumption about virtio API (Amit Shah) [576241]
+- [virt] MAINTAINERS: Put the virtio-console entry in correct alphabetical order (Amit Shah) [576241]
+- [virt] virtio: console: Fix early_put_chars usage (Amit Shah) [576241]
+- [virt] virtio: console: Check if port is valid in resize_console (Amit Shah) [576241]
+- [virt] virtio: console: Generate a kobject CHANGE event on adding 'name' attribute (Amit Shah) [576241]
+- [virt] virtio: console: Use better variable names for fill_queue operation (Amit Shah) [576241]
+- [virt] virtio: console: Fix type of 'len' as unsigned int (Amit Shah) [576241]
+- [vfs] rename block_fsync() to blkdev_fsync() (Jeff Moyer) [579781]
+- [char] raw: add an fsync method (Jeff Moyer) [579781]
+- [x86] Don't use logical-flat mode when more than 8 CPUs are possible (John Villalovos) [563798]
+- [net] Backport the new socket API recvmmsg, receive multiple messages (Arnaldo Carvalho de Melo) [579850]
+- [kernel] coredump: fix the page leak in dump_seek() (Oleg Nesterov) [580126]
+- [s390x] callhome: fix broken proc interface and activate comp ID (Hendrik Brueckner) [579482]
+
+* Mon Apr 12 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-21.el6]
+- [x86] Update x86 MCE code (Prarit Bhargava) [580587]
+- [scsi] 3w-xxxx: Force 60 second timeout default (Tomas Henzl) [572778]
+- [netdrv] enic: update to upstream version 1.3.1.1 (Andy Gospodarek) [575950]
+- [netdrv] igb: Add support for 82576 ET2 Quad Port Server Adapter (Stefan Assmann) [577421]
+- [kernel] resource: Fix generic page_is_ram() for partial RAM pages (Prarit Bhargava) [578834]
+- [x86] Use the generic page_is_ram() (Prarit Bhargava) [578834]
+- [x86] Remove BIOS data range from e820 (Prarit Bhargava) [578834]
+- [kernel] Move page_is_ram() declaration to mm.h (Prarit Bhargava) [578834]
+- [kernel] Generic page_is_ram: use __weak (Prarit Bhargava) [578834]
+- [kernel] resources: introduce generic page_is_ram() (Prarit Bhargava) [578834]
+- [fs] GFS2: Clean up copying from stuffed files (Steven Whitehouse) [580857]
+- [netdrv] igb: restrict WoL for 82576 ET2 Quad Port Server Adapter (Stefan Assmann) [578804]
+- [drm] radeon/kms: move radeon KMS on/off switch out of staging (Dave Airlie) [580766]
+- [netdrv] p54: fix deadlocks under tx load (Michal Schmidt) [580557]
+- [gfs2] GFS2: Mandatory locking fix (Steven Whitehouse) [571606] {CVE-2010-0727}
+- [x86] AMD: Fix NULL pointer dereference on 32-bit (Bhavna Sarathy) [571474]
+- [x86] Add wbinvd SMP helper routines (Bhavna Sarathy) [571474]
+- [x86] L3 cache: Remove NUMA dependency (Bhavna Sarathy) [571474]
+- [x86] Calculate L3 indices (Bhavna Sarathy) [571474]
+- [x86] Add cache index disable sys attributes (Bhavna Sarathy) [571474]
+- [x86] Fix disabling of L3 cache indices (Bhavna Sarathy) [571474]
+- [fs] NFS: Avoid a deadlock in nfs_release_page (Jeff Layton) [525963]
+- [fs] NFS: Remove requirement for inode->i_mutex from nfs_invalidate_mapping (Jeff Layton) [525963]
+- [fs] NFS: Clean up nfs_sync_mapping (Jeff Layton) [525963]
+- [fs] NFS: Simplify nfs_wb_page() (Jeff Layton) [525963]
+- [fs] NFS: Replace __nfs_write_mapping with sync_inode() (Jeff Layton) [525963]
+- [fs] NFS: Simplify nfs_wb_page_cancel() (Jeff Layton) [525963]
+- [fs] NFS: Ensure inode is always marked I_DIRTY_DATASYNC, if it has unstable pages (Jeff Layton) [525963]
+- [fs] NFS: Run COMMIT as an asynchronous RPC call when wbc->for_background is set (Jeff Layton) [525963]
+- [fs] NFS: Reduce the number of unnecessary COMMIT calls (Jeff Layton) [525963]
+- [fs] NFS: Add a count of the number of unstable writes carried by an inode (Jeff Layton) [525963]
+- [fs] NFS: Cleanup - move nfs_write_inode() into fs/nfs/write.c (Jeff Layton) [525963]
+- [fs] writeback: pass writeback_control to ->write_inode (Jeff Layton) [525963]
+- [fs] writeback: make sure data is on disk before calling ->write_inode (Jeff Layton) [525963]
+- [fs] writeback: introduce wbc.for_background (Jeff Layton) [525963]
+- [netdrv] macvlan: fix support for multiple driver backends (Anthony Liguori) [553337 566731]
+- [netdrv] net/macvtap: add vhost support (Anthony Liguori) [553337 566731]
+- [netdrv] macvtap: add GSO/csum offload support (Anthony Liguori) [553337 566731]
+- [netdrv] macvtap: rework object lifetime rules (Anthony Liguori) [553337 566731]
+- [netdrv] macvtap: fix reference counting (Anthony Liguori) [553337 566731]
+- [netdrv] net: macvtap driver (Anthony Liguori) [553337 566731]
+- [netdrv] macvlan: export macvlan mode through netlink (Anthony Liguori) [553337 566731]
+- [netdrv] macvlan: implement bridge, VEPA and private mode (Anthony Liguori) [553337 566731]
+- [netdrv] macvlan: cleanup rx statistics (Anthony Liguori) [553337 566731]
+- [netdrv] macvlan: Precise RX stats accounting (Anthony Liguori) [553337 566731]
+- [netdrv] macvlan: add private dev_txq_stats_fold function (Anthony Liguori) [553337 566731]
+- [netdrv] veth: move loopback logic to common location (Anthony Liguori) [553337 566731]
+- [s390x] zfcp: Remove lock dependency on unit remove (Hendrik Brueckner) [576860]
+- [s390x] zfcp: Remove lock dependency on unit add (Hendrik Brueckner) [576860]
+- [s390x] zfcp: Remove lock dependency on CCW remove (Hendrik Brueckner) [576860]
+- [s390x] dasd: fix alignment of transport mode recovery TCW (Hendrik Brueckner) [575824]
+- [s390x] cio: fix drvdata usage for the console subchannel (Hendrik Brueckner) [575826]
+- [s390x] zcore: CPU registers are not saved under LPAR (Hendrik Brueckner) [575221]
+- [s390x] zfcpdump: Use direct IO in order to increase dump speed (Hendrik Brueckner) [575189]
+- [s390x] qeth: change checksumming default for HiperSockets (Hendrik Brueckner) [572227]
+- [s390x] qeth: l3 send dhcp in non pass thru mode (Hendrik Brueckner) [572225]
+- [s390x] zfcp: Remove attached ports and units correctly (Hendrik Brueckner) [571938]
+- [drm] Bring in nouveau updates from upstream (Ben Skeggs) [558468]
+- [vfs] pass struct file to do_truncate on O_TRUNC opens (Jeff Layton) [573995]
+- [vfs] O_TRUNC open shouldn't fail after file truncation (Jeff Layton) [573995]
+- [net] netfilter: ctnetlink: compute message size properly (Jiri Pirko) [578476]
+- [block] cfq-iosched: Do not merge queues of BE and IDLE classes (Jeff Moyer) [577393]
+- [block] remove 16 bytes of padding from struct request on 64bits (Jeff Moyer) [577393]
+- [block] cfq: remove 8 bytes of padding from cfq_rb_root on 64 bit builds (Jeff Moyer) [577393]
+- [block] cfq-iosched: quantum check tweak (Jeff Moyer) [577393]
+- [block] remove padding from io_context on 64bit builds (Jeff Moyer) [577393]
+- [block] cfq: reorder cfq_queue removing padding on 64bit (Jeff Moyer) [577393]
+- [block] cfq-iosched: split seeky coop queues after one slice (Jeff Moyer) [577393]
+- [x86] edac, mce: Filter out invalid values (Bhavna Sarathy) [574487]
+- [x86] edac, mce, amd: silence GART TLB errors (Bhavna Sarathy) [574487]
+- [x86] edac, mce: correct corenum reporting (Bhavna Sarathy) [574487]
+- [x86] edac, mce: update AMD F10h revD check (Bhavna Sarathy) [574487]
+- [x86] amd64_edac: Simplify ECC override handling (Bhavna Sarathy) [574487]
+- [x86] amd64_edac: Do not falsely trigger kerneloops (Bhavna Sarathy) [574487]
+- [x86] amd64_edac: Ensure index stays within bounds in amd64_get_scrub_rate (Bhavna Sarathy) [574487]
+- [x86] amd64_edac: restrict PCI config space access (Bhavna Sarathy) [574487]
+- [x86] amd64_edac: fix K8 chip select reporting (Bhavna Sarathy) [574487]
+- [x86] amd64_edac: bump driver version (Bhavna Sarathy) [574487]
+- [x86] amd64_edac: fix use-uninitialised bug (Bhavna Sarathy) [574487]
+- [x86] amd64_edac: correct sys address to chip select mapping (Bhavna Sarathy) [574487]
+- [x86] amd64_edac: add a leaner syndrome decoding algorithm (Bhavna Sarathy) [574487]
+- [x86] amd64_edac: remove early hw support check (Bhavna Sarathy) [574487]
+- [x86] amd64_edac: detect DDR3 memory type (Bhavna Sarathy) [574487]
+- [x86] edac: add memory types strings for debugging (Bhavna Sarathy) [574487]
+- [x86] amd64_edac: remove unneeded extract_error_address wrapper (Bhavna Sarathy) [574487]
+- [x86] amd64_edac: rename StinkyIdentifier (Bhavna Sarathy) [574487]
+- [x86] amd64_edac: remove superfluous dbg printk (Bhavna Sarathy) [574487]
+- [x86] amd64_edac: enhance address to DRAM bank mapping (Bhavna Sarathy) [574487]
+- [x86] amd64_edac: cleanup f10_early_channel_count (Bhavna Sarathy) [574487]
+- [x86] amd64_edac: dump DIMM sizes on K8 too (Bhavna Sarathy) [574487]
+- [x86] amd64_edac: cleanup rest of amd64_dump_misc_regs (Bhavna Sarathy) [574487]
+- [x86] amd64_edac: cleanup DRAM cfg low debug output (Bhavna Sarathy) [574487]
+- [x86] amd64_edac: wrap-up pci config read error handling (Bhavna Sarathy) [574487]
+- [x86] amd64_edac: make DRAM regions output more human-readable (Bhavna Sarathy) [574487]
+- [x86] amd64_edac: clarify DRAM CTL debug reporting (Bhavna Sarathy) [574487]
+
+* Tue Apr 06 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-20.el6]
+- [netdrv] iwlwifi: fix kdump hang (Stanislaw Gruszka) [575122]
+- [kernel] clockevent: Don't remove broadcast device when cpu is dead (Danny Feng) [572438]
+- [block] Export max number of segments and max segment size in sysfs (Jeff Moyer) [574132]
+- [block] Finalize conversion of block limits functions (Jeff Moyer) [574132]
+- [block] Fix overrun in lcm() and move it to lib (Jeff Moyer) [574132]
+- [block] jiffies fixes (Jeff Moyer) [574132]
+- [block] Consolidate phys_segment and hw_segment limits (Jeff Moyer) [574132]
+- [block] Rename blk_queue_max_sectors to blk_queue_max_hw_sectors (Jeff Moyer) [574132]
+- [block] Add BLK_ prefix to definitions (Jeff Moyer) [574132]
+- [block] Remove unused accessor function (Jeff Moyer) [574132]
+- [block] Update blk_queue_max_sectors and documentation (Jeff Moyer) [574132]
+- [ata] ahci: Turn off DMA engines when there's no device attached (Matthew Garrett) [577967]
+- [scsi] qla2xxx: minor updates and fixes from upstream (Rob Evers) [574526]
+- [scsi] Additional BSG corrections from upstream (Rob Evers) [574590]
+- [netdrv] be2net: Update be2net 10GB NIC driver to version 2.102.147u (Ivan Vecera) [576172]
+- [scsi] update fibre channel layer (Mike Christie) [571824]
+- [scsi] lpfc Update from 8.3.5.6 to 8.3.5.7 FC/FCoE (Rob Evers) [576174]
+- [netdrv] e100: fix the 'size' argument passed to pci_pool_create() (Dean Nelson) [576887]
+- [kernel] futex: remove rw parameter from get_futex_key() (Amerigo Wang) [555700]
+- [drm] Add drm_gem_object_handle_unreference_unlocked and drm_gem_object_unreference_unlocked (Adam Jackson) [575910]
+- [drm] i915: Update to 2.6.34-rc1 (pre-vga-switcheroo) (Adam Jackson) [575910]
+- [scsi] libfcoe: Send port LKA every FIP_VN_KA_PERIOD secs (Rob Evers) [570693]
+- [scsi] fnic: updating driver to 1.4.0.98 syncs w/ upstream (Rob Evers) [570693]
+- [sound] snd-hda-intel: avoid divide by zero (Jaroslav Kysela) [567173] {CVE-2010-1085}
+- [netdrv] bnx2x: use new firmware (Stanislaw Gruszka) [560993]
+- [netdrv] bnx2: remove old firmware (Stanislaw Gruszka) [560993]
+- [netdrv] bnx2x: 1.52.1-6 firmware (Stanislaw Gruszka) [560993]
+- [netdrv] bnx2x: 1.52.1-6 bug fixes (Stanislaw Gruszka) [560993]
+- [ata] ahci: support FIS-based switching (David Milburn) [463152]
+- [drm] radeon: better GPU reset for lockup (Jerome Glisse) [576511]
+- [block] cciss: add 30 second initial timeout wait on controller reset (Tomas Henzl) [574094]
+- [serial] fix hang in serial console open (Neil Horman) [568418]
+- [virt] vmw_pvscsi: adding vmware paravirtualized driver (Rob Evers) [553062]
+- [scsi] 3w-9xxx: update 3w-9xxx to v2.26.02.014RH (Tomas Henzl) [572779]
+- [netdrv] ixgbevf: initial support for 82599VF driver (Andy Gospodarek) [462790]
+- [netdrv] ixgbe: update to version 2.0.62-k2 (Andy Gospodarek) [462790]
+- [netdrv] netxen: More critical bug fixes and AER support (Tony Camuso) [516840]
+- [netdrv] netxen: Sync with upstream kernel bug fixes (Tony Camuso) [516840]
+- [fs] dlm: use bastmode in debugfs output (David Teigland) [568102]
+- [fs] dlm: send reply before bast (David Teigland) [568102]
+- [fs] dlm: fix ordering of bast and cast (David Teigland) [568102]
+- [virt] virtio-net: remove send queue (Anthony Liguori) [555698]
+- [virt] virtio-net: Defer skb allocation and remove recv queue (Anthony Liguori) [555698]
+- [net] bridge: Allow enable/disable UFO on bridge device via ethtool (Anthony Liguori) [555537]
+- [net] Make UFO on master device independent of attached devices (Anthony Liguori) [555537]
+- [fs] xfs: fix locking for inode cache radix tree tag updates (Christoph Hellwig) [573836]
+- [uv] fix microcode.ctl slow down in boot-time on large systems (George Beshers) [573018]
+- [scsi] lpfc Update from 8.3.5.5 to 8.3.5.6 FC/FCoE (Rob Evers) [568889]
+- [mm] transparent hugepage support update (Andrea Arcangeli) [556572]
+- [netdrv] e1000e: fix data corruptor in NFS packet split filtering hw (Neil Horman) [572350]
+- [security] selinux: dynamic class/perm discovery (Eric Paris) [570812]
+- [security] selinux/ss: correct size computation (Eric Paris) [573000]
+- [security] SELinux: reduce size of access vector hash table (Eric Paris) [570433]
+- [security] SELinux: reset the security_ops before flushing the avc cache (Eric Paris) [572998]
+- [sched] Fix sched_mc_power_savings for !SMT (Danny Feng) [571879]
+- [security] selinux: Only audit permissions specified in policy (Eric Paris) [573002]
+- [security] selinux: fix memory leak in sel_make_bools (Eric Paris) [573008]
+- [security] SELinux: Make selinux_kernel_create_files_as() shouldn't just always return 0 (Eric Paris) [573011]
+- [security] selinux: convert range transition list to a hashtab (Eric Paris) [572702]
+- [virt] x86: remove kmap_atomic_pte paravirt op (Paolo Bonzini) [567203]
+- [virt] vmi: disable highmem PTE allocation even when CONFIG_HIGHPTE=y (Paolo Bonzini) [567203]
+- [virt] xen: disable highmem PTE allocation even when CONFIG_HIGHPTE=y (Paolo Bonzini) [567203]
+- [virt] x86: allow allocation of highmem user page tables to be disabled when CONFIG_HIGHPTE=y (Paolo Bonzini) [567203]
+- [netdrv] qlge: update to latest upstream (Andy Gospodarek) [562311]
+- [netdrv] add netif_printk helpers (Andy Gospodarek) [562311]
+- [net] bridge: Fix build error when IGMP_SNOOPING is not enabled (Herbert Xu) [574321]
+- [net] bridge: Add multicast count/interval sysfs entries (Herbert Xu) [574321]
+- [net] bridge: Add hash elasticity/max sysfs entries (Herbert Xu) [574321]
+- [net] bridge: Add multicast_snooping sysfs toggle (Herbert Xu) [574321]
+- [net] bridge: Add multicast_router sysfs entries (Herbert Xu) [574321]
+- [net] bridge: Add multicast data-path hooks (Herbert Xu) [574321]
+- [net] bridge: Add multicast start/stop hooks (Herbert Xu) [574321]
+- [net] bridge: Add multicast forwarding functions (Herbert Xu) [574321]
+- [net] bridge: Move NULL mdb check into br_mdb_ip_get (Herbert Xu) [574321]
+- [net] bridge: ensure to unlock in error path in br_multicast_query() (Herbert Xu) [574321]
+- [net] bridge: Fix RCU race in br_multicast_stop (Herbert Xu) [574321]
+- [net] bridge: Use RCU list primitive in __br_mdb_ip_get (Herbert Xu) [574321]
+- [net] bridge: cleanup: remove unneed check (Herbert Xu) [574321]
+- [net] bridge: depends on INET (Herbert Xu) [574321]
+- [net] bridge: Make IGMP snooping depend upon BRIDGE. (Herbert Xu) [574321]
+- [net] bridge: Add core IGMP snooping support (Herbert Xu) [574321]
+- [net] bridge: Fix br_forward crash in promiscuous mode (Herbert Xu) [574321]
+- [net] bridge: Split may_deliver/deliver_clone out of br_flood (Herbert Xu) [574321]
+- [net] bridge: Use BR_INPUT_SKB_CB on xmit path (Herbert Xu) [574321]
+- [net] bridge: Avoid unnecessary clone on forward path (Herbert Xu) [574321]
+- [net] bridge: Allow tail-call on br_pass_frame_up (Herbert Xu) [574321]
+- [net] bridge: Do br_pass_frame_up after other ports (Herbert Xu) [574321]
+- [net] Add netdev_alloc_skb_ip_align() helper (Herbert Xu) [574321]
+- [kernel] futex_lock_pi() key refcnt fix (Danny Feng) [566347] {CVE-2010-0623}
+- [pci] AER: fix aer inject result in kernel oops (Prarit Bhargava) [568515]
+- [scsi] fix 32bit compatibility in BSG interface (Rob Evers) [554538]
+- [x86] ACPI: don't cond_resched if irq is disabled (Danny Feng) [572441]
+- [x86] Ensure dell-laptop buffers are below 4GB (Matthew Garrett) [570036]
+- [hwmon] add hex '0x' indication to coretemp module output (Dean Nelson) [571865]
+- [cifs] update cifs client code to latest upstream code (Jeff Layton) [562788]
+- [block] fix merge_bvec_fn return value checks (Mike Snitzer) [571455]
+- [fs] ext4: avoid uninit mem references on some mount options (Eric Sandeen) [562008]
+- [s390x] dasd: Correct offline processing (Hendrik Brueckner) [568376]
+- [s390x] dasd: Fix refcounting (Hendrik Brueckner) [568376]
+- [x86] amd_iommu: remove dma-ops warning message (Bhavna Sarathy) [560002]
+- [x86] amd_iommu: Fix IO page fault by adding device notifiers (Bhavna Sarathy) [560002]
+- [x86] amd_iommu: Fix IOMMU API initialization for iommu=pt (Bhavna Sarathy) [560002]
+- [x86] amd_iommu: Fix possible integer overflow (Bhavna Sarathy) [560002]
+- [x86] amd_iommu: Fix deassignment of a device from the pt domain (Bhavna Sarathy) [560002]
+- [gfs2] Allow the number of committed revokes to temporarily be negative (Benjamin Marzinski) [563907]
+- [ppc64] powerpc: export data from new hcall H_EM_GET_PARMS (Steve Best) [570019]
+- [x86] ACPI: Be in TS_POLLING state during mwait based C-state entry (Avi Kivity) [571440]
+- [net] tcp: fix ICMP-RTO war (Jiri Olsa) [567532]
+- [mm] Add padding to mm structures allow future patches during the RHEL6 life (Larry Woodman) [554511]
+
 * Tue Mar 09 2010 Aristeu Rozanski <arozansk@redhat.com> [2.6.32-19.el6]
 - [mm] Switch to SLAB (Aristeu Rozanski) [570614]
 

@@ -1,3 +1,59 @@
+From 810b98f82c5999118c2f74d5a22c7f0836771c7b Mon Sep 17 00:00:00 2001
+From: S.Çağlar Onur <caglar@cs.princeton.edu>
+Date: Tue, 7 Dec 2010 11:05:31 -0500
+Subject: [PATCH] linux-2.6-250-ipsets.patch
+
+---
+ include/linux/netfilter_ipv4/ip_set.h            |  498 ++++++
+ include/linux/netfilter_ipv4/ip_set_iphash.h     |   30 +
+ include/linux/netfilter_ipv4/ip_set_ipmap.h      |   56 +
+ include/linux/netfilter_ipv4/ip_set_ipporthash.h |   34 +
+ include/linux/netfilter_ipv4/ip_set_iptree.h     |   40 +
+ include/linux/netfilter_ipv4/ip_set_iptreemap.h  |   40 +
+ include/linux/netfilter_ipv4/ip_set_jhash.h      |  148 ++
+ include/linux/netfilter_ipv4/ip_set_macipmap.h   |   38 +
+ include/linux/netfilter_ipv4/ip_set_malloc.h     |  116 ++
+ include/linux/netfilter_ipv4/ip_set_nethash.h    |   55 +
+ include/linux/netfilter_ipv4/ip_set_portmap.h    |   25 +
+ include/linux/netfilter_ipv4/ipt_set.h           |   21 +
+ net/ipv4/netfilter/Kconfig                       |  117 ++
+ net/ipv4/netfilter/Makefile                      |   13 +
+ net/ipv4/netfilter/ip_set.c                      | 2005 ++++++++++++++++++++++
+ net/ipv4/netfilter/ip_set_iphash.c               |  429 +++++
+ net/ipv4/netfilter/ip_set_ipmap.c                |  336 ++++
+ net/ipv4/netfilter/ip_set_ipporthash.c           |  581 +++++++
+ net/ipv4/netfilter/ip_set_iptree.c               |  612 +++++++
+ net/ipv4/netfilter/ip_set_iptreemap.c            |  829 +++++++++
+ net/ipv4/netfilter/ip_set_macipmap.c             |  375 ++++
+ net/ipv4/netfilter/ip_set_nethash.c              |  497 ++++++
+ net/ipv4/netfilter/ip_set_portmap.c              |  346 ++++
+ net/ipv4/netfilter/ipt_SET.c                     |  162 ++
+ net/ipv4/netfilter/ipt_set.c                     |  160 ++
+ 25 files changed, 7563 insertions(+), 0 deletions(-)
+ create mode 100644 include/linux/netfilter_ipv4/ip_set.h
+ create mode 100644 include/linux/netfilter_ipv4/ip_set_iphash.h
+ create mode 100644 include/linux/netfilter_ipv4/ip_set_ipmap.h
+ create mode 100644 include/linux/netfilter_ipv4/ip_set_ipporthash.h
+ create mode 100644 include/linux/netfilter_ipv4/ip_set_iptree.h
+ create mode 100644 include/linux/netfilter_ipv4/ip_set_iptreemap.h
+ create mode 100644 include/linux/netfilter_ipv4/ip_set_jhash.h
+ create mode 100644 include/linux/netfilter_ipv4/ip_set_macipmap.h
+ create mode 100644 include/linux/netfilter_ipv4/ip_set_malloc.h
+ create mode 100644 include/linux/netfilter_ipv4/ip_set_nethash.h
+ create mode 100644 include/linux/netfilter_ipv4/ip_set_portmap.h
+ create mode 100644 include/linux/netfilter_ipv4/ipt_set.h
+ create mode 100644 net/ipv4/netfilter/ip_set.c
+ create mode 100644 net/ipv4/netfilter/ip_set_iphash.c
+ create mode 100644 net/ipv4/netfilter/ip_set_ipmap.c
+ create mode 100644 net/ipv4/netfilter/ip_set_ipporthash.c
+ create mode 100644 net/ipv4/netfilter/ip_set_iptree.c
+ create mode 100644 net/ipv4/netfilter/ip_set_iptreemap.c
+ create mode 100644 net/ipv4/netfilter/ip_set_macipmap.c
+ create mode 100644 net/ipv4/netfilter/ip_set_nethash.c
+ create mode 100644 net/ipv4/netfilter/ip_set_portmap.c
+ create mode 100644 net/ipv4/netfilter/ipt_SET.c
+ create mode 100644 net/ipv4/netfilter/ipt_set.c
+
 diff --git a/include/linux/netfilter_ipv4/ip_set.h b/include/linux/netfilter_ipv4/ip_set.h
 new file mode 100644
 index 0000000..92a746e
@@ -7729,3 +7785,6 @@ index 0000000..f192013
 +
 +module_init(ipt_ipset_init);
 +module_exit(ipt_ipset_fini);
+-- 
+1.5.4.3
+

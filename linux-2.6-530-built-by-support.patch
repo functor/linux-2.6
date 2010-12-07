@@ -1,3 +1,12 @@
+From 45f623649676ca5f3138498964cee0a8740c2e24 Mon Sep 17 00:00:00 2001
+From: S.Çağlar Onur <caglar@cs.princeton.edu>
+Date: Tue, 7 Dec 2010 11:08:15 -0500
+Subject: [PATCH] linux-2.6-530-built-by-support.patch
+
+---
+ scripts/mkcompile_h |    4 ++--
+ 1 files changed, 2 insertions(+), 2 deletions(-)
+
 diff --git a/scripts/mkcompile_h b/scripts/mkcompile_h
 index bce3d0f..ffa7b7a 100755
 --- a/scripts/mkcompile_h
@@ -13,3 +22,6 @@ index bce3d0f..ffa7b7a 100755
  
    if [ -x /bin/dnsdomainname ]; then
      domain=`dnsdomainname 2> /dev/null`
+-- 
+1.5.4.3
+

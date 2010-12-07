@@ -1,3 +1,16 @@
+From bd4f158ca795506569b503210e667dfd192c011e Mon Sep 17 00:00:00 2001
+From: S.Çağlar Onur <caglar@cs.princeton.edu>
+Date: Tue, 7 Dec 2010 11:07:12 -0500
+Subject: [PATCH] linux-2.6-523-raw-sockets.patch
+
+---
+ include/linux/vserver/network.h |    2 ++
+ net/core/sock.c                 |   15 ++++++++++++++-
+ net/ipv4/af_inet.c              |    3 +++
+ net/ipv4/ip_options.c           |    6 +++---
+ net/ipv4/raw.c                  |   13 +++++++------
+ 5 files changed, 29 insertions(+), 10 deletions(-)
+
 diff --git a/include/linux/vserver/network.h b/include/linux/vserver/network.h
 index 1775630..86715c2 100644
 --- a/include/linux/vserver/network.h
@@ -12,10 +25,10 @@ index 1775630..86715c2 100644
  
  /* address types */
 diff --git a/net/core/sock.c b/net/core/sock.c
-index d276d4b..ac135b9 100644
+index 53cb689..4638715 100644
 --- a/net/core/sock.c
 +++ b/net/core/sock.c
-@@ -395,7 +395,7 @@ static int sock_bindtodevice(struct sock *sk, char __user *optval, int optlen)
+@@ -401,7 +401,7 @@ static int sock_bindtodevice(struct sock *sk, char __user *optval, int optlen)
  
  	/* Sorry... */
  	ret = -EPERM;
@@ -24,7 +37,7 @@ index d276d4b..ac135b9 100644
  		goto out;
  
  	ret = -EINVAL;
-@@ -531,6 +531,19 @@ set_sndbuf:
+@@ -537,6 +537,19 @@ set_sndbuf:
  		}
  		goto set_sndbuf;
  
@@ -45,7 +58,7 @@ index d276d4b..ac135b9 100644
  		/* Don't error on this BSD doesn't and if you think
  		   about it this is right. Otherwise apps have to
 diff --git a/net/ipv4/af_inet.c b/net/ipv4/af_inet.c
-index 026c3b1..1e9b53c 100644
+index 9e8942b..1c0b4a5 100644
 --- a/net/ipv4/af_inet.c
 +++ b/net/ipv4/af_inet.c
 @@ -332,6 +332,9 @@ lookup_protocol:
@@ -57,7 +70,7 @@ index 026c3b1..1e9b53c 100644
 +		goto override;
  	if (sock->type == SOCK_RAW && !kern && !capable(CAP_NET_RAW))
  		goto out_rcu_unlock;
- override:
+ 
 diff --git a/net/ipv4/ip_options.c b/net/ipv4/ip_options.c
 index 94bf105..dc81f1c 100644
 --- a/net/ipv4/ip_options.c
@@ -148,3 +161,6 @@ index 8913f67..3583cba 100644
  		sk->sk_nx_info &&
  		!v4_addr_in_nx_info(sk->sk_nx_info, iph->saddr, NXA_MASK_BIND))
  		goto error_free;
+-- 
+1.5.4.3
+
