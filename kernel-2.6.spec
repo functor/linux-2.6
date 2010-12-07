@@ -139,10 +139,12 @@ Summary: The Linux kernel
 %define doc_build_fail true
 %endif
 
+#### Planet-Lab ####
 # Control whether we perform a compat. check against published ABI.
-%define with_kabichk   %{?_without_kabichk:   0} %{?!_without_kabichk: 1}
+%define with_kabichk   %{?_without_kabichk:   0} %{?!_without_kabichk: 0}
 # Control whether we perform a compat. check against published ABI.
-%define with_fips      %{?_without_fips:      0} %{?!_without_fips:      1}
+%define with_fips      %{?_without_fips:      0} %{?!_without_fips:      0}
+#### Planet-Lab ####
 
 # Additional options for user-friendly one-off kernel building:
 #
