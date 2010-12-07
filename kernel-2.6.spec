@@ -35,7 +35,9 @@ Summary: The Linux kernel
 %define rhel 1
 %if %{rhel}
 %define distro_build 71.7.1
+#### Planet-Lab ####
 %define signmodules 0
+#### Planet-Lab ####
 %else
 # fedora_build defines which build revision of this kernel version we're
 # building. Rather than incrementing forever, as with the prior versioning
@@ -216,7 +218,7 @@ Summary: The Linux kernel
 %endif
 #### Planet-Lab ####
 %define pkg_release %{taglevel}%{?pldistro:.%{pldistro}}%{?date:.%{date}}
-####
+#### Planet-Lab ####
 %define KVERREL %{rpmversion}-%{pkg_release}.%{_target_cpu}
 
 %if !%{debugbuildsenabled}
@@ -510,7 +512,9 @@ AutoProv: yes\
 Name: kernel%{?variant}
 Group: System Environment/Kernel
 License: GPLv2
+#### Planet-Lab ####
 #URL: http://www.kernel.org/
+#### Planet-Lab ####
 Version: %{rpmversion}
 Release: %{pkg_release}
 # DO NOT CHANGE THE 'ExclusiveArch' LINE TO TEMPORARILY EXCLUDE AN ARCHITECTURE BUILD.
@@ -895,6 +899,7 @@ cp %{SOURCE15} %{SOURCE1} %{SOURCE16} %{SOURCE17} %{SOURCE18} .
 # Dynamically generate kernel .config files from config-* files
 make -f %{SOURCE20} VERSION=%{version} configs
 
+#### Planet-Lab ####
 ApplyPatch patch-2.6.32-71.7.1.el6-vs2.3.0.36.29.4.diff
 ApplyPatch linux-2.6-220-delta-ptrace-fix01.patch
 ApplyPatch linux-2.6-250-ipsets.patch
@@ -916,6 +921,7 @@ ApplyPatch linux-2.6-640-netlink-audit-hack.patch
 ApplyPatch linux-2.6-650-hangcheck-reboot.patch
 ApplyPatch linux-2.6-660-nmi-watchdog-default.patch
 ApplyPatch linux-2.6-680-htb-hysteresis-tso.patch
+#### Planet-Lab ####
 
 ApplyOptionalPatch linux-kernel-test.patch
 
