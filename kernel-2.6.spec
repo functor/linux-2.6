@@ -3617,7 +3617,7 @@ BuildKernel() {
     echo BUILDING A KERNEL FOR ${Flavour} %{_target_cpu}...
 
     # make sure EXTRAVERSION says what we want it to say
-    perl -p -i -e "s/^EXTRAVERSION.*/EXTRAVERSION = %{?stablerev}-%{release}.%{_target_cpu}${Flavour:+.${Flavour}}/" Makefile
+    perl -p -i -e "s/^EXTRAVERSION.*/EXTRAVERSION = %{?stablerev}-%{release}-%{_target_cpu}${Flavour:+.${Flavour}}/" Makefile
 
     # if pre-rc1 devel kernel, must fix up SUBLEVEL for our versioning scheme
     %if !0%{?rcrev}
