@@ -424,7 +424,7 @@ index 0000000..f8553c5
 +	return XT_CONTINUE;
 +}
 +
-+static int
++static bool
 +checkentry_v2(const struct xt_tgchk_param *par)
 +
 +
