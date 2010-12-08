@@ -10,7 +10,7 @@ URL: %(echo %{url} | cut -d ' ' -f 2)
 
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 0
+%define taglevel 1
 
 %define sublevel 32
 #### Planet-Lab ####
@@ -1703,6 +1703,9 @@ fi
 %endif
 
 %changelog
+* Wed Dec 08 2010 S.Çağlar Onur <caglar@cs.princeton.edu> - linux-2.6-32-1
+- Bump to latest RHEL6 kernel
+
 * Wed Oct 27 2010 Frantisek Hrbata <fhrbata@redhat.com> [2.6.32-71.7.1.el6]
 - [drm] ttm: fix regression introduced in dfb4a4250168008c5ac61e90ab2b86f074a83a6c (Dave Airlie) [646994 644896]
 
