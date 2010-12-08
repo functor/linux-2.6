@@ -86,10 +86,11 @@ trees: sources
 srpm: sources
 	mkdir -p SOURCES SRPMS
 	(cd SOURCES; rpm2cpio ../$(SOURCE_RPM) | cpio -diu; \
-	 cp ../$(notdir $(SPECFILE)) . ; cp ../linux-*.patch .; cp ../config-vserver . ; cp ../config-planetlab .; \
+	 cp ../$(notdir $(SPECFILE)) . ; cp ../linux-*.patch .; cp ../config-vserver . ; cp ../config-planetlab .; cp ../config-workarounds .; \
 	 for downloaded in $(SOURCEFILES) ; do cp ../$$downloaded . ; done ; \
 	 cat config-vserver >> config-generic ; \
 	 cat config-planetlab >> config-generic ; \
+	 cat config-workarounds >> config-generic ; \
 	 sed -i -e s,CONFIG_IPV6=m,CONFIG_IPV6=y, config-generic ;\
 	 sed -e -e s,CONFIG_MODULE_SIG=y,CONFIG_MODULE_SIG=n, config-generic-rhel)
 	./rpmmacros.sh
