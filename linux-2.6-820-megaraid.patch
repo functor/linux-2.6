@@ -1,6 +1,6 @@
-diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-960/drivers/scsi/megaraid/megaraid_sas.c
---- linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c	2007-07-08 19:32:17.000000000 -0400
-+++ linux-2.6.22-960/drivers/scsi/megaraid/megaraid_sas.c	2010-07-20 16:47:48.000000000 -0400
+diff -Nurp linux-2.6.22-810/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-820/drivers/scsi/megaraid/megaraid_sas.c
+--- linux-2.6.22-810/drivers/scsi/megaraid/megaraid_sas.c	2007-07-08 19:32:17.000000000 -0400
++++ linux-2.6.22-820/drivers/scsi/megaraid/megaraid_sas.c	2010-12-08 15:32:31.000000000 -0500
 @@ -2,26 +2,23 @@
   *
   *		Linux MegaRAID driver for SAS based RAID controllers
@@ -700,78 +700,13 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  
  	megasas_return_cmd(instance, cmd);
  	return 0;
-@@ -433,34 +897,15 @@ megasas_make_sgl32(struct megasas_instan
- 	int sge_count;
- 	struct scatterlist *os_sgl;
- 
--	/*
--	 * Return 0 if there is no data transfer
--	 */
--	if (!scp->request_buffer || !scp->request_bufflen)
--		return 0;
--
--	if (!scp->use_sg) {
--		mfi_sgl->sge32[0].phys_addr = pci_map_single(instance->pdev,
--							     scp->
--							     request_buffer,
--							     scp->
--							     request_bufflen,
--							     scp->
--							     sc_data_direction);
--		mfi_sgl->sge32[0].length = scp->request_bufflen;
-+	sge_count = scsi_dma_map(scp);
-+	BUG_ON(sge_count < 0);
- 
--		return 1;
--	}
--
--	os_sgl = (struct scatterlist *)scp->request_buffer;
--	sge_count = pci_map_sg(instance->pdev, os_sgl, scp->use_sg,
--			       scp->sc_data_direction);
--
--	for (i = 0; i < sge_count; i++, os_sgl++) {
--		mfi_sgl->sge32[i].length = sg_dma_len(os_sgl);
--		mfi_sgl->sge32[i].phys_addr = sg_dma_address(os_sgl);
-+	if (sge_count) {
-+		scsi_for_each_sg(scp, os_sgl, sge_count, i) {
-+			mfi_sgl->sge32[i].length = sg_dma_len(os_sgl);
-+			mfi_sgl->sge32[i].phys_addr = sg_dma_address(os_sgl);
-+		}
- 	}
--
+@@ -513,14 +977,66 @@ megasas_make_sgl64(struct megasas_instan
  	return sge_count;
  }
  
-@@ -481,46 +926,58 @@ megasas_make_sgl64(struct megasas_instan
- 	int sge_count;
- 	struct scatterlist *os_sgl;
- 
--	/*
--	 * Return 0 if there is no data transfer
--	 */
--	if (!scp->request_buffer || !scp->request_bufflen)
--		return 0;
-+	sge_count = scsi_dma_map(scp);
-+	BUG_ON(sge_count < 0);
- 
--	if (!scp->use_sg) {
--		mfi_sgl->sge64[0].phys_addr = pci_map_single(instance->pdev,
--							     scp->
--							     request_buffer,
--							     scp->
--							     request_bufflen,
--							     scp->
--							     sc_data_direction);
-+	if (sge_count) {
-+		scsi_for_each_sg(scp, os_sgl, sge_count, i) {
-+			mfi_sgl->sge64[i].length = sg_dma_len(os_sgl);
-+			mfi_sgl->sge64[i].phys_addr = sg_dma_address(os_sgl);
-+		}
-+	}
-+	return sge_count;
-+}
- 
--		mfi_sgl->sge64[0].length = scp->request_bufflen;
+- /**
+- * megasas_get_frame_count - Computes the number of frames
+- * @sge_count		: number of sg elements
 +/**
 + * megasas_make_sgl_skinny - Prepares IEEE SGL
 + * @instance:           Adapter soft state
@@ -788,34 +723,44 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
 +	int i;
 +	int sge_count;
 +	struct scatterlist *os_sgl;
- 
--		return 1;
--	}
-+	sge_count = scsi_dma_map(scp);
- 
--	os_sgl = (struct scatterlist *)scp->request_buffer;
--	sge_count = pci_map_sg(instance->pdev, os_sgl, scp->use_sg,
--			       scp->sc_data_direction);
--
--	for (i = 0; i < sge_count; i++, os_sgl++) {
--		mfi_sgl->sge64[i].length = sg_dma_len(os_sgl);
--		mfi_sgl->sge64[i].phys_addr = sg_dma_address(os_sgl);
-+	if (sge_count) {
-+		scsi_for_each_sg(scp, os_sgl, sge_count, i) {
-+			mfi_sgl->sge_skinny[i].length = sg_dma_len(os_sgl);
-+			mfi_sgl->sge_skinny[i].phys_addr =
-+						sg_dma_address(os_sgl);
-+ 			mfi_sgl->sge_skinny[i].flag = 0;
-+		}
- 	}
--
- 	return sge_count;
- }
- 
-  /**
-  * megasas_get_frame_count - Computes the number of frames
++
++	/*
++	 * Return 0 if there is no data transfer
++	 */
++	if (!scp->request_buffer || !scp->request_bufflen)
++		return 0;
++
++	if (!scp->use_sg) {
++		mfi_sgl->sge_skinny[0].phys_addr = pci_map_single(instance->pdev,
++							     scp->
++							     request_buffer,
++							     scp->
++							     request_bufflen,
++							     scp->
++							     sc_data_direction);
++
++		mfi_sgl->sge_skinny[0].length = scp->request_bufflen;
++
++		return 1;
++	}
++
++	os_sgl = (struct scatterlist *)scp->request_buffer;
++	sge_count = pci_map_sg(instance->pdev, os_sgl, scp->use_sg,
++			       scp->sc_data_direction);
++
++	for (i = 0; i < sge_count; i++, os_sgl++) {
++		mfi_sgl->sge_skinny[i].length = sg_dma_len(os_sgl);
++		mfi_sgl->sge_skinny[i].phys_addr = sg_dma_address(os_sgl);
++		mfi_sgl->sge_skinny[i].flag = 0;
++	}
++
++	return sge_count;
++}
++
++ /**
++ * megasas_get_frame_count - Computes the number of frames
 + * @frame_type		: type of frame- io or pthru frame
-  * @sge_count		: number of sg elements
++ * @sge_count		: number of sg elements
   *
   * Returns the number of frames required for numnber of sge's (sge_count)
   */
@@ -826,7 +771,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  {
  	int num_cnt;
  	int sge_bytes;
-@@ -530,14 +987,31 @@ static u32 megasas_get_frame_count(u8 sg
+@@ -530,14 +1046,31 @@ static u32 megasas_get_frame_count(u8 sg
  	sge_sz = (IS_DMA64) ? sizeof(struct megasas_sge64) :
  	    sizeof(struct megasas_sge32);
  
@@ -865,7 +810,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  
  	if(num_cnt>0){
  		sge_bytes = sge_sz * num_cnt;
-@@ -582,6 +1056,10 @@ megasas_build_dcdb(struct megasas_instan
+@@ -582,6 +1115,10 @@ megasas_build_dcdb(struct megasas_instan
  	else if (scp->sc_data_direction == PCI_DMA_NONE)
  		flags = MFI_FRAME_DIR_NONE;
  
@@ -876,14 +821,13 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  	/*
  	 * Prepare the DCDB frame
  	 */
-@@ -592,15 +1070,31 @@ megasas_build_dcdb(struct megasas_instan
+@@ -592,15 +1129,31 @@ megasas_build_dcdb(struct megasas_instan
  	pthru->lun = scp->device->lun;
  	pthru->cdb_len = scp->cmd_len;
  	pthru->timeout = 0;
 +	pthru->pad_0 = 0;
  	pthru->flags = flags;
--	pthru->data_xfer_len = scp->request_bufflen;
-+	pthru->data_xfer_len = scsi_bufflen(scp);
+ 	pthru->data_xfer_len = scp->request_bufflen;
  
  	memcpy(pthru->cdb, scp->cmnd, scp->cmd_len);
  
@@ -910,7 +854,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  		pthru->flags |= MFI_FRAME_SGL64;
  		pthru->sge_count = megasas_make_sgl64(instance, scp,
  						      &pthru->sgl);
-@@ -608,6 +1102,10 @@ megasas_build_dcdb(struct megasas_instan
+@@ -608,6 +1161,10 @@ megasas_build_dcdb(struct megasas_instan
  		pthru->sge_count = megasas_make_sgl32(instance, scp,
  						      &pthru->sgl);
  
@@ -921,7 +865,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  	/*
  	 * Sense info specific
  	 */
-@@ -619,7 +1117,8 @@ megasas_build_dcdb(struct megasas_instan
+@@ -619,7 +1176,8 @@ megasas_build_dcdb(struct megasas_instan
  	 * Compute the total number of frames this command consumes. FW uses
  	 * this number to pull sufficient number of frames from host memory.
  	 */
@@ -931,7 +875,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  
  	return cmd->frame_count;
  }
-@@ -628,7 +1127,7 @@ megasas_build_dcdb(struct megasas_instan
+@@ -628,7 +1186,7 @@ megasas_build_dcdb(struct megasas_instan
   * megasas_build_ldio -	Prepares IOs to logical devices
   * @instance:		Adapter soft state
   * @scp:		SCSI command
@@ -940,7 +884,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
   *
   * Frames (and accompanying SGLs) for regular SCSI IOs use this function.
   */
-@@ -649,6 +1148,10 @@ megasas_build_ldio(struct megasas_instan
+@@ -649,6 +1207,10 @@ megasas_build_ldio(struct megasas_instan
  	else if (scp->sc_data_direction == PCI_DMA_FROMDEVICE)
  		flags = MFI_FRAME_DIR_READ;
  
@@ -951,7 +895,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  	/*
  	 * Prepare the Logical IO frame: 2nd bit is zero for all read cmds
  	 */
-@@ -719,12 +1222,20 @@ megasas_build_ldio(struct megasas_instan
+@@ -719,12 +1281,20 @@ megasas_build_ldio(struct megasas_instan
  	/*
  	 * Construct SGL
  	 */
@@ -973,7 +917,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  	/*
  	 * Sense info specific
  	 */
-@@ -736,7 +1247,8 @@ megasas_build_ldio(struct megasas_instan
+@@ -736,7 +1306,8 @@ megasas_build_ldio(struct megasas_instan
  	 * Compute the total number of frames this command consumes. FW uses
  	 * this number to pull sufficient number of frames from host memory.
  	 */
@@ -983,39 +927,20 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  
  	return cmd->frame_count;
  }
-@@ -821,109 +1333,1311 @@ megasas_dump_pending_frames(struct megas
- 	printk(KERN_ERR "\nmegasas[%d]: Pending Internal cmds in FW : \n",instance->host->host_no);
- 	for (i = 0; i < max_cmd; i++) {
- 
--		cmd = instance->cmd_list[i];
-+		cmd = instance->cmd_list[i];
-+
-+		if(cmd->sync_cmd == 1){
-+			printk(KERN_ERR "0x%08lx : ", (unsigned long)cmd->frame_phys_addr);
-+		}
-+	}
-+	printk(KERN_ERR "megasas[%d]: Dumping Done.\n\n",instance->host->host_no);
-+}
-+
-+/**
-+ * megasas_queue_command -	Queue entry point
-+ * @scmd:			SCSI command to be queued
-+ * @done:			Callback entry point
-+ */
-+static int
-+megasas_queue_command(struct scsi_cmnd *scmd, void (*done) (struct scsi_cmnd *))
-+{
-+	u32 frame_count;
-+	struct megasas_cmd *cmd;
-+	struct megasas_instance *instance;
+@@ -841,14 +1412,25 @@ megasas_queue_command(struct scsi_cmnd *
+ 	u32 frame_count;
+ 	struct megasas_cmd *cmd;
+ 	struct megasas_instance *instance;
 +	unsigned long flags;
-+
-+	instance = (struct megasas_instance *)
-+	    scmd->device->host->hostdata;
-+
+ 
+ 	instance = (struct megasas_instance *)
+ 	    scmd->device->host->hostdata;
+ 
+-	/* Don't process if we have already declared adapter dead */
+-	if (instance->hw_crit_error)
 +        if (instance->issuepend_done == 0)
-+		return SCSI_MLQUEUE_HOST_BUSY;
-+
+ 		return SCSI_MLQUEUE_HOST_BUSY;
+ 
 +	spin_lock_irqsave(&instance->hba_lock, flags);
 +	//Don't process if we have already declared adapter dead
 +	// If we are in middle of bringing up the HBA, send the busy status to mid-layer
@@ -1027,50 +952,14 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
 +
 +	spin_unlock_irqrestore(&instance->hba_lock, flags);
 +
-+	scmd->scsi_done = done;
-+	scmd->result = 0;
-+
-+	if (MEGASAS_IS_LOGICAL(scmd) &&
-+	    (scmd->device->id >= MEGASAS_MAX_LD || scmd->device->lun)) {
-+		scmd->result = DID_BAD_TARGET << 16;
-+		goto out_done;
-+	}
-+
-+	switch (scmd->cmnd[0]) {
-+	case SYNCHRONIZE_CACHE:
-+		/*
-+		 * FW takes care of flush cache on its own
-+		 * No need to send it down
-+		 */
-+		scmd->result = DID_OK << 16;
-+		goto out_done;
-+	default:
-+		break;
-+	}
-+
-+	cmd = megasas_get_cmd(instance);
-+	if (!cmd)
-+		return SCSI_MLQUEUE_HOST_BUSY;
-+
-+	/*
-+	 * Logical drive command
-+	 */
-+	if (megasas_is_ldio(scmd))
-+		frame_count = megasas_build_ldio(instance, scmd, cmd);
-+	else
-+		frame_count = megasas_build_dcdb(instance, scmd, cmd);
-+
-+	if (!frame_count)
-+		goto out_return_cmd;
-+
-+	cmd->scmd = scmd;
-+	scmd->SCp.ptr = (char *)cmd;
-+
-+	/*
-+	 * Issue the command to the FW
-+	 */
-+	atomic_inc(&instance->fw_outstanding);
-+
+ 	scmd->scsi_done = done;
+ 	scmd->result = 0;
+ 
+@@ -893,7 +1475,14 @@ megasas_queue_command(struct scsi_cmnd *
+ 	 */
+ 	atomic_inc(&instance->fw_outstanding);
+ 
+-	instance->instancet->fire_cmd(cmd->frame_phys_addr ,cmd->frame_count-1,instance->reg_set);
 +	instance->instancet->fire_cmd(instance, cmd->frame_phys_addr,
 +				cmd->frame_count-1, instance->reg_set);
 +	/*
@@ -1079,16 +968,13 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
 +	if (poll_mode_io && atomic_read(&instance->fw_outstanding))
 +		tasklet_schedule(&instance->isr_tasklet);
 +
-+
-+	return 0;
-+
-+ out_return_cmd:
-+	megasas_return_cmd(instance, cmd);
-+ out_done:
-+	done(scmd);
-+	return 0;
-+}
-+
+ 
+ 	return 0;
+ 
+@@ -904,211 +1493,1527 @@ megasas_queue_command(struct scsi_cmnd *
+ 	return 0;
+ }
+ 
 +static struct megasas_instance *megasas_lookup_instance(u16 host_no)
 +{
 +	int i;
@@ -1103,14 +989,21 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
 +	return NULL;
 +}
 +
-+static int megasas_slave_configure(struct scsi_device *sdev)
-+{
+ static int megasas_slave_configure(struct scsi_device *sdev)
+ {
 +	u16             pd_index = 0;
 +	struct  megasas_instance *instance ;
 +
 +	instance = megasas_lookup_instance(sdev->host->host_no);
 +
-+	/*
+ 	/*
+-	 * Don't export physical disk devices to the disk driver.
+-	 *
+-	 * FIXME: Currently we don't export them to the midlayer at all.
+-	 * 	  That will be fixed once LSI engineers have audited the
+-	 * 	  firmware for possible issues.
+-	 */
+-	if (sdev->channel < MEGASAS_MAX_PD_CHANNELS && sdev->type == TYPE_DISK)
 +	* Don't export physical disk devices to the disk driver.
 +	*
 +	* FIXME: Currently we don't export them to the midlayer at all.
@@ -1119,8 +1012,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
 +	*/
 +	if (sdev->channel < MEGASAS_MAX_PD_CHANNELS) {
 +		if (sdev->type == TYPE_TAPE) {
-+			blk_queue_rq_timeout(sdev->request_queue,
-+				     MEGASAS_DEFAULT_CMD_TIMEOUT * HZ);
++			sdev->timeout = MEGASAS_DEFAULT_CMD_TIMEOUT * HZ;
 +			return 0;
 +		} else if (sdev->type == TYPE_DISK) {
 +		
@@ -1128,24 +1020,37 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
 +		
 +			if ((instance->pd_list[pd_index].driveState == MR_PD_STATE_SYSTEM) &&
 +				(instance->pd_list[pd_index].driveType == TYPE_DISK)) {
-+				blk_queue_rq_timeout(sdev->request_queue,
-+				     MEGASAS_DEFAULT_CMD_TIMEOUT * HZ);
++					sdev->timeout = MEGASAS_DEFAULT_CMD_TIMEOUT * HZ;
 +				return 0;
 +			}
 +		}
-+		return -ENXIO;
+ 		return -ENXIO;
 +	}
-+
-+	/*
+ 
+ 	/*
+-	 * The RAID firmware may require extended timeouts.
+-	 */
+-	if (sdev->channel >= MEGASAS_MAX_PD_CHANNELS)
+-		sdev->timeout = MEGASAS_DEFAULT_CMD_TIMEOUT * HZ;
 +	* The RAID firmware may require extended timeouts.
 +	*/
-+	blk_queue_rq_timeout(sdev->request_queue,
-+		MEGASAS_DEFAULT_CMD_TIMEOUT * HZ);
-+	return 0;
-+}
-+
++	sdev->timeout = MEGASAS_DEFAULT_CMD_TIMEOUT * HZ;
+ 	return 0;
+ }
+ 
+-/**
+- * megasas_wait_for_outstanding -	Wait for all outstanding cmds
+- * @instance:				Adapter soft state
+- *
+- * This function waits for upto MEGASAS_RESET_WAIT_TIME seconds for FW to
+- * complete all its outstanding commands. Returns error if one or more IOs
+- * are pending after this time period. It also marks the controller dead.
+- */
+-static int megasas_wait_for_outstanding(struct megasas_instance *instance)
 +static void megaraid_sas_kill_hba(struct megasas_instance *instance)
-+{
+ {
+-	int i;
+-	u32 wait_time = MEGASAS_RESET_WAIT_TIME;
 +       if ((instance->pdev->device == PCI_DEVICE_ID_LSI_SAS0073SKINNY) ||
 +               (instance->pdev->device == PCI_DEVICE_ID_LSI_SAS0071SKINNY))
 +       {
@@ -1156,15 +1061,25 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
 +                       &instance->reg_set->inbound_doorbell);
 +       }
 +}
-+
-+
-+
-+
+ 
+-	for (i = 0; i < wait_time; i++) {
+ 
+-		int outstanding = atomic_read(&instance->fw_outstanding);
+ 
+-		if (!outstanding)
+-			break;
+ 
+-		if (!(i % MEGASAS_RESET_NOTICE_INTERVAL)) {
+-			printk(KERN_NOTICE "megasas: [%2d]waiting for %d "
+-			       "commands to complete\n",i,outstanding);
+-		}
 +void xor_gen_15x1(u32 *buff_ptrs[16], u32 bytes)
 +{
 +    u32    off, words;
 +    u32    *d, *s1, *s2, *s3, *s4, *s5, *s6, *s7, *s8, *s9, *s10, *s11, *s12, *s13, *s14, *s15;
-+
+ 
+-		msleep(1000);
+-	}
 +    d   = buff_ptrs[0];
 +    s1  = buff_ptrs[1];
 +    s2  = buff_ptrs[2];
@@ -1181,19 +1096,43 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
 +    s13 = buff_ptrs[13];
 +    s14 = buff_ptrs[14];
 +    s15 = buff_ptrs[15];
-+
+ 
+-	if (atomic_read(&instance->fw_outstanding)) {
+-		/*
+-		* Send signal to FW to stop processing any pending cmds.
+-		* The controller will be taken offline by the OS now.
+-		*/
+-		writel(MFI_STOP_ADP,
+-				&instance->reg_set->inbound_doorbell);
+-		megasas_dump_pending_frames(instance);
+-		instance->hw_crit_error = 1;
+-		return FAILED;
+-	}
 +    for (words = bytes/4, off=0; words>0; words--, off++)
 +        d[off] = s1[off] ^ s2[off] ^ s3[off] ^ s4[off] ^ s5[off] ^ s6[off] ^ s7[off] ^\
 +            s8[off] ^ s9[off] ^ s10[off] ^ s11[off] ^ s12[off] ^ s13[off] ^ s14[off] ^ s15[off];
-+
-+}
-+
+ 
+-	return SUCCESS;
+ }
+ 
+-/**
+- * megasas_generic_reset -	Generic reset routine
+- * @scmd:			Mid-layer SCSI command
+- *
+- * This routine implements a generic reset handler for device, bus and host
+- * reset requests. Device, bus and host specific reset handlers can use this
+- * function after they do their specific tasks.
+- */
+-static int megasas_generic_reset(struct scsi_cmnd *scmd)
 +
 +void xor_gen_14x1(u32 *buff_ptrs[15], u32 bytes)
-+{
+ {
+-	int ret_val;
+-	struct megasas_instance *instance;
 +    u32    off, words;
 +    u32    *d, *s1, *s2, *s3, *s4, *s5, *s6, *s7, *s8, *s9, *s10, *s11, *s12, *s13, *s14;
-+
+ 
+-	instance = (struct megasas_instance *)scmd->device->host->hostdata;
 +    d   = buff_ptrs[0];
 +    s1  = buff_ptrs[1];
 +    s2  = buff_ptrs[2];
@@ -1209,14 +1148,27 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
 +    s12 = buff_ptrs[12];
 +    s13 = buff_ptrs[13];
 +    s14 = buff_ptrs[14];
-+
+ 
+-	scmd_printk(KERN_NOTICE, scmd, "megasas: RESET -%ld cmd=%x retries=%x\n",
+-		 scmd->serial_number, scmd->cmnd[0], scmd->retries);
 +    for (words = bytes/4, off=0; words>0; words--, off++)
 +        d[off] = s1[off] ^ s2[off] ^ s3[off] ^ s4[off] ^ s5[off] ^ s6[off] ^ s7[off] ^\
 +            s8[off] ^ s9[off] ^ s10[off] ^ s11[off] ^ s12[off] ^ s13[off] ^ s14[off];
-+
+ 
+-	if (instance->hw_crit_error) {
+-		printk(KERN_ERR "megasas: cannot recover from previous reset "
+-		       "failures\n");
+-		return FAILED;
+-	}
 +}
-+
-+
+ 
+-	ret_val = megasas_wait_for_outstanding(instance);
+-	if (ret_val == SUCCESS)
+-		printk(KERN_NOTICE "megasas: reset successful \n");
+-	else
+-		printk(KERN_ERR "megasas: failed to do reset\n");
+ 
+-	return ret_val;
 +void xor_gen_13x1(u32 *buff_ptrs[14], u32 bytes)
 +{
 +    u32    off, words;
@@ -1241,14 +1193,35 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
 +        d[off] = s1[off] ^ s2[off] ^ s3[off] ^ s4[off] ^ s5[off] ^ s6[off] ^ s7[off] ^\
 +            s8[off] ^ s9[off] ^ s10[off] ^ s11[off] ^ s12[off] ^ s13[off];
 +
-+}
-+
-+
+ }
+ 
+-/**
+- * megasas_reset_timer - quiesce the adapter if required
+- * @scmd:		scsi cmnd
+- *
+- * Sets the FW busy flag and reduces the host->can_queue if the
+- * cmd has not been completed within the timeout period.
+- */
+-static enum
+-scsi_eh_timer_return megasas_reset_timer(struct scsi_cmnd *scmd)
+-{
+-	struct megasas_cmd *cmd = (struct megasas_cmd *)scmd->SCp.ptr;
+-	struct megasas_instance *instance;
+-	unsigned long flags;
+ 
+-	if (time_after(jiffies, scmd->jiffies_at_alloc +
+-				(MEGASAS_DEFAULT_CMD_TIMEOUT * 2) * HZ)) {
+-		return EH_NOT_HANDLED;
+-	}
 +void xor_gen_12x1(u32 *buff_ptrs[13], u32 bytes)
 +{
 +    u32    off, words;
 +    u32    *d, *s1, *s2, *s3, *s4, *s5, *s6, *s7, *s8, *s9, *s10, *s11, *s12;
-+
+ 
+-	instance = cmd->instance;
+-	if (!(instance->flag & MEGASAS_FW_BUSY)) {
+-		/* FW is busy, throttle IO */
+-		spin_lock_irqsave(instance->host->host_lock, flags);
 +    d   = buff_ptrs[0];
 +    s1  = buff_ptrs[1];
 +    s2  = buff_ptrs[2];
@@ -1262,19 +1235,34 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
 +    s10 = buff_ptrs[10];
 +    s11 = buff_ptrs[11];
 +    s12 = buff_ptrs[12];
-+
+ 
+-		instance->host->can_queue = 16;
+-		instance->last_time = jiffies;
+-		instance->flag |= MEGASAS_FW_BUSY;
 +    for (words = bytes/4, off=0; words>0; words--, off++)
 +        d[off] = s1[off] ^ s2[off] ^ s3[off] ^ s4[off] ^ s5[off] ^ s6[off] ^ s7[off] ^\
 +            s8[off] ^ s9[off] ^ s10[off] ^ s11[off] ^ s12[off];
-+
-+}
-+
+ 
+-		spin_unlock_irqrestore(instance->host->host_lock, flags);
+-	}
+-	return EH_RESET_TIMER;
+ }
+ 
+-/**
+- * megasas_reset_device -	Device reset handler entry point
+- */
+-static int megasas_reset_device(struct scsi_cmnd *scmd)
 +
 +void xor_gen_11x1(u32 *buff_ptrs[12], u32 bytes)
-+{
+ {
+-	int ret;
 +    u32    off, words;
 +    u32    *d, *s1, *s2, *s3, *s4, *s5, *s6, *s7, *s8, *s9, *s10, *s11;
-+
+ 
+-	/*
+-	 * First wait for all commands to complete
+-	 */
+-	ret = megasas_generic_reset(scmd);
 +    d   = buff_ptrs[0];
 +    s1  = buff_ptrs[1];
 +    s2  = buff_ptrs[2];
@@ -1291,15 +1279,25 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
 +    for (words = bytes/4, off=0; words>0; words--, off++)
 +        d[off] = s1[off] ^ s2[off] ^ s3[off] ^ s4[off] ^ s5[off] ^ s6[off] ^ s7[off] ^\
 +            s8[off] ^ s9[off] ^ s10[off] ^ s11[off];
-+
-+}
-+
+ 
+-	return ret;
+ }
+ 
+-/**
+- * megasas_reset_bus_host -	Bus & host reset handler entry point
+- */
+-static int megasas_reset_bus_host(struct scsi_cmnd *scmd)
 +
 +void xor_gen_10x1(u32 *buff_ptrs[11], u32 bytes)
-+{
+ {
+-	int ret;
 +    u32    off, words;
 +    u32    *d, *s1, *s2, *s3, *s4, *s5, *s6, *s7, *s8, *s9, *s10;
-+
+ 
+-	/*
+-	 * First wait for all commands to complete
+-	 */
+-	ret = megasas_generic_reset(scmd);
 +    d   = buff_ptrs[0];
 +    s1  = buff_ptrs[1];
 +    s2  = buff_ptrs[2];
@@ -1315,15 +1313,35 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
 +    for (words = bytes/4, off=0; words>0; words--, off++)
 +        d[off] = s1[off] ^ s2[off] ^ s3[off] ^ s4[off] ^ s5[off] ^ s6[off] ^ s7[off] ^\
 +            s8[off] ^ s9[off] ^ s10[off];
-+
-+}
-+
+ 
+-	return ret;
+ }
+ 
+-/**
+- * megasas_bios_param - Returns disk geometry for a disk
+- * @sdev: 		device handle
+- * @bdev:		block device
+- * @capacity:		drive capacity
+- * @geom:		geometry parameters
+- */
+-static int
+-megasas_bios_param(struct scsi_device *sdev, struct block_device *bdev,
+-		 sector_t capacity, int geom[])
 +
 +void xor_gen_9x1(u32 *buff_ptrs[10], u32 bytes)
-+{
+ {
+-	int heads;
+-	int sectors;
+-	sector_t cylinders;
+-	unsigned long tmp;
+-	/* Default heads (64) & sectors (32) */
+-	heads = 64;
+-	sectors = 32;
 +    u32    off, words;
 +    u32    *d, *s1, *s2, *s3, *s4, *s5, *s6, *s7, *s8, *s9;
-+
+ 
+-	tmp = heads * sectors;
+-	cylinders = capacity;
 +    d   = buff_ptrs[0];
 +    s1  = buff_ptrs[1];
 +    s2  = buff_ptrs[2];
@@ -1334,14 +1352,28 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
 +    s7  = buff_ptrs[7];
 +    s8  = buff_ptrs[8];
 +    s9  = buff_ptrs[9];
-+
+ 
+-	sector_div(cylinders, tmp);
 +    for (words = bytes/4, off=0; words>0; words--, off++)
 +        d[off] = s1[off] ^ s2[off] ^ s3[off] ^ s4[off] ^ s5[off] ^ s6[off] ^ s7[off] ^\
 +            s8[off] ^ s9[off];
-+
+ 
+-	/*
+-	 * Handle extended translation size for logical drives > 1Gb
+-	 */
 +}
-+
-+
+ 
+-	if (capacity >= 0x200000) {
+-		heads = 255;
+-		sectors = 63;
+-		tmp = heads*sectors;
+-		cylinders = capacity;
+-		sector_div(cylinders, tmp);
+-	}
+ 
+-	geom[0] = heads;
+-	geom[1] = sectors;
+-	geom[2] = cylinders;
 +void xor_gen_8x1(u32 *buff_ptrs[9], u32 bytes)
 +{
 +    u32    off, words;
@@ -1359,9 +1391,13 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
 +
 +    for (words = bytes/4, off=0; words>0; words--, off++)
 +        d[off] = s1[off] ^ s2[off] ^ s3[off] ^ s4[off] ^ s5[off] ^ s6[off] ^ s7[off] ^ s8[off];
-+
-+}
-+
+ 
+-	return 0;
+ }
+ 
+-/**
+- * megasas_service_aen -	Processes an event notification
+- * @instance:			Adapter soft state
 +
 +void xor_gen_7x1(u32 *buff_ptrs[8], u32 bytes)
 +{
@@ -2067,7 +2103,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
 +	struct scatterlist	*os_sgl;
 +	struct megasas_cmd	*mega_cmd;
 +	struct megasas_io_frame *ldio;
-+	
++
 +	if ( cpy_des->mfi_cmd_cxt  >= instance->max_fw_cmds ){
 +		printk("megasas: invalid context - 0x%x shoul be < 0x%x \n", cpy_des->mfi_cmd_cxt ,instance->max_fw_cmds );
 +                return MR_CPX_STATUS_FAILURE;
@@ -2077,12 +2113,14 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
 +	os_cmd = mega_cmd->scmd;
 +	ldio = (struct megasas_io_frame *)mega_cmd->frame;
 +	sge_cnt = ldio->sge_count;
-+	
++
 +	host_skip_count_handled = 0;
 +	row_idx = 0;
++	fw_ptr = NULL;
 +	row_remaining_length =0;
-+	
-+	scsi_for_each_sg(os_cmd, os_sgl, sge_cnt, os_sge_idx){
++	os_sgl = (struct scatterlist *)os_cmd->request_buffer;
++
++	for ( os_sge_idx=0; os_sge_idx < sge_cnt; os_sge_idx++, os_sgl++ ){
 +		
 +		os_sge_len = sg_dma_len(os_sgl);
 +
@@ -2106,7 +2144,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
 +				row_remaining_length = cpy_des->copy_buf[row_idx].size;
 +			}
 +
-+			if ( (status = megasas_copy( sg_page(os_sgl), os_sgl->offset, os_sge_offset, fw_ptr,
++			if ( (status = megasas_copy( os_sgl->page, os_sgl->offset, os_sge_offset, fw_ptr,
 +						     MIN(os_sge_len, row_remaining_length), cpy_des->dir) ) )
 +			     break;
 +			
@@ -2152,9 +2190,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
 +	u32 producer_idx, consumer_idx;
 +	u8 retval = 0;
 +	unsigned long flags;
- 
--		if(cmd->sync_cmd == 1){
--			printk(KERN_ERR "0x%08lx : ", (unsigned long)cmd->frame_phys_addr);
++
 +	producer_idx = req_q->producer_idx;
 +	consumer_idx = req_q->consumer_idx;
 +	
@@ -2172,7 +2208,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
 +			printk("Fatal Error : Got invalid descriptor type...\n");
 +			retval = MR_CPX_STATUS_FAILURE;
 +			break;
- 		}
++		}
 +
 +		rsp_data.r.status = retval;
 +		rsp_data.r.context = cpx_des->cpx_copy_desc.hdr.context;
@@ -2189,38 +2225,28 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
 +		if ( consumer_idx == instance->cpx_dscrptr_cnt )
 +			consumer_idx = 0;
 +		
- 	}
--	printk(KERN_ERR "megasas[%d]: Dumping Done.\n\n",instance->host->host_no);
++	}
 +		req_q->consumer_idx = producer_idx;
 +	
 +	return 0;
- }
- 
- /**
-- * megasas_queue_command -	Queue entry point
-- * @scmd:			SCSI command to be queued
-- * @done:			Callback entry point
++}
++
++/**
 + * megasas_complete_cmd_dpc	 -	Returns FW's controller structure
 + * @instance_addr:			Address of adapter soft state
 + *
 + * Tasklet to complete cmds
-  */
--static int
--megasas_queue_command(struct scsi_cmnd *scmd, void (*done) (struct scsi_cmnd *))
++ */
 +static void megasas_complete_cmd_dpc(unsigned long instance_addr)
- {
--	u32 frame_count;
++{
 +	u32 producer;
 +	u32 consumer;
 +	u32 context;
- 	struct megasas_cmd *cmd;
--	struct megasas_instance *instance;
++	struct megasas_cmd *cmd;
 +	struct megasas_instance *instance =
 +				(struct megasas_instance *)instance_addr;
 +	unsigned long flags;
- 
--	instance = (struct megasas_instance *)
--	    scmd->device->host->hostdata;
++
 +	/* If we have already declared adapter dead, donot complete cmds */
 +	spin_lock_irqsave(&instance->hba_lock, flags);
 +	if (instance->adprecovery == MEGASAS_HW_CRITICAL_ERROR ) { 
@@ -2228,39 +2254,19 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
 +		return;
 +	}
 +	spin_unlock_irqrestore(&instance->hba_lock, flags);
- 
--	/* Don't process if we have already declared adapter dead */
--	if (instance->hw_crit_error)
--		return SCSI_MLQUEUE_HOST_BUSY;
++
 +	spin_lock_irqsave(&instance->completion_lock, flags);
- 
--	scmd->scsi_done = done;
--	scmd->result = 0;
++
 +	producer = *instance->producer;
 +	consumer = *instance->consumer;
- 
--	if (MEGASAS_IS_LOGICAL(scmd) &&
--	    (scmd->device->id >= MEGASAS_MAX_LD || scmd->device->lun)) {
--		scmd->result = DID_BAD_TARGET << 16;
--		goto out_done;
--	}
++
 +	while (consumer != producer) {
 +		context = instance->reply_queue[consumer];
 +		if (context >= instance->max_fw_cmds) {
 +			printk("ERROR ERROR: unexpected context value %x\n", context);
 +			BUG();
 +		}
- 
--	switch (scmd->cmnd[0]) {
--	case SYNCHRONIZE_CACHE:
--		/*
--		 * FW takes care of flush cache on its own
--		 * No need to send it down
--		 */
--		scmd->result = DID_OK << 16;
--		goto out_done;
--	default:
--		break;
++
 +		cmd = instance->cmd_list[context];
 +
 +		megasas_complete_cmd(instance, cmd, DID_OK);
@@ -2269,43 +2275,24 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
 +		if (consumer == (instance->max_fw_cmds + 1)) {
 +			consumer = 0;
 +		}
- 	}
- 
--	cmd = megasas_get_cmd(instance);
--	if (!cmd)
--		return SCSI_MLQUEUE_HOST_BUSY;
++	}
++
 +	*instance->consumer = producer;
- 
--	/*
--	 * Logical drive command
--	 */
--	if (megasas_is_ldio(scmd))
--		frame_count = megasas_build_ldio(instance, scmd, cmd);
--	else
--		frame_count = megasas_build_dcdb(instance, scmd, cmd);
++
 +	spin_unlock_irqrestore(&instance->completion_lock, flags);
 +	
- 
--	if (!frame_count)
--		goto out_return_cmd;
- 
--	cmd->scmd = scmd;
--	scmd->SCp.ptr = (char *)cmd;
++
++
 +	if ( instance->cpx_supported )
 +		megasas_handle_cpx_requests( instance);
- 
- 	/*
--	 * Issue the command to the FW
++
++	/*
 +	 * Check if we can restore can_queue
- 	 */
--	atomic_inc(&instance->fw_outstanding);
--
--	instance->instancet->fire_cmd(cmd->frame_phys_addr ,cmd->frame_count-1,instance->reg_set);
++	 */
 +	if (instance->flag & MEGASAS_FW_BUSY
 +		&& time_after(jiffies, instance->last_time + 5 * HZ)
 +		&& atomic_read(&instance->fw_outstanding) < 17) {
- 
--	return 0;
++
 +		spin_lock_irqsave(instance->host->host_lock, flags);
 +		instance->flag &= ~MEGASAS_FW_BUSY;
 +		if ((instance->pdev->device ==
@@ -2317,36 +2304,14 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
 +		} else
 +			instance->host->can_queue =
 +				instance->max_fw_cmds - MEGASAS_INT_CMDS;
- 
-- out_return_cmd:
--	megasas_return_cmd(instance, cmd);
-- out_done:
--	done(scmd);
--	return 0;
++
 +		spin_unlock_irqrestore(instance->host->host_lock, flags);
 +	}
- }
- 
--static int megasas_slave_configure(struct scsi_device *sdev)
--{
--	/*
--	 * Don't export physical disk devices to the disk driver.
--	 *
--	 * FIXME: Currently we don't export them to the midlayer at all.
--	 * 	  That will be fixed once LSI engineers have audited the
--	 * 	  firmware for possible issues.
--	 */
--	if (sdev->channel < MEGASAS_MAX_PD_CHANNELS && sdev->type == TYPE_DISK)
--		return -ENXIO;
++}
++
 +static void megasas_internal_reset_defer_cmds(struct megasas_instance *instance);
 +static void process_fw_state_change_wq(struct work_struct *work); 
- 
--	/*
--	 * The RAID firmware may require extended timeouts.
--	 */
--	if (sdev->channel >= MEGASAS_MAX_PD_CHANNELS)
--		sdev->timeout = MEGASAS_DEFAULT_CMD_TIMEOUT * HZ;
--	return 0;
++
 +void megasas_do_ocr(struct megasas_instance *instance)
 +{
 +       if ((instance->pdev->device == PCI_DEVICE_ID_LSI_SAS1064R) ||
@@ -2363,29 +2328,30 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
 +       atomic_set(&instance->fw_outstanding, 0);
 +       megasas_internal_reset_defer_cmds(instance);
 +	process_fw_state_change_wq(&instance->work_init); 
- }
- 
++}
 +
- /**
-  * megasas_wait_for_outstanding -	Wait for all outstanding cmds
-  * @instance:				Adapter soft state
-@@ -934,11 +2648,86 @@ static int megasas_slave_configure(struc
-  */
- static int megasas_wait_for_outstanding(struct megasas_instance *instance)
- {
--	int i;
++
++/**
++ * megasas_wait_for_outstanding -	Wait for all outstanding cmds
++ * @instance:				Adapter soft state
++ *
++ * This function waits for upto MEGASAS_RESET_WAIT_TIME seconds for FW to
++ * complete all its outstanding commands. Returns error if one or more IOs
++ * are pending after this time period. It also marks the controller dead.
++ */
++static int megasas_wait_for_outstanding(struct megasas_instance *instance)
++{
 +	int i, sl;
 +	u32 reset_index;
- 	u32 wait_time = MEGASAS_RESET_WAIT_TIME;
++	u32 wait_time = MEGASAS_RESET_WAIT_TIME;
 +	u8 adprecovery;
 +	unsigned long flags;
 +	struct list_head clist_local;
 +	struct megasas_cmd *reset_cmd;
 +	u32 fw_state;
 +	u8 kill_adapter_flag;
- 
--	for (i = 0; i < wait_time; i++) {
- 
++
++
 +	// If we are in-process if internal reset, we should wait for that process to
 +	// complete
 +	spin_lock_irqsave(&instance->hba_lock, flags);
@@ -2455,24 +2421,24 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
 +	// Kernel reset without internal reset in progress.
 +	printk("megaraid_sas: HBA reset handler invoked without an internal reset condition.\n");
 +	for (i = 0; i < wait_time; i++) {
- 		int outstanding = atomic_read(&instance->fw_outstanding);
- 
- 		if (!outstanding)
-@@ -947,23 +2736,79 @@ static int megasas_wait_for_outstanding(
- 		if (!(i % MEGASAS_RESET_NOTICE_INTERVAL)) {
- 			printk(KERN_NOTICE "megasas: [%2d]waiting for %d "
- 			       "commands to complete\n",i,outstanding);
++		int outstanding = atomic_read(&instance->fw_outstanding);
++
++		if (!outstanding)
++			break;
++
++		if (!(i % MEGASAS_RESET_NOTICE_INTERVAL)) {
++			printk(KERN_NOTICE "megasas: [%2d]waiting for %d "
++			       "commands to complete\n",i,outstanding);
 +			/*
 +			 * Call cmd completion routine. Cmd to be
 +			 * be completed directly without depending on isr.
 +			 */
 +			megasas_complete_cmd_dpc((unsigned long)instance);
- 		}
- 
- 		msleep(1000);
- 	}
- 
--	if (atomic_read(&instance->fw_outstanding)) {
++		}
++
++		msleep(1000);
++	}
++
 +	i = 0;
 +	kill_adapter_flag = 0;
 +	do {
@@ -2513,11 +2479,10 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
 +
 +	if (atomic_read(&instance->fw_outstanding) || (kill_adapter_flag == 2)) {
 +		printk("megaraid_sas: pending commands remain even after reset handling.\n");
- 		/*
- 		* Send signal to FW to stop processing any pending cmds.
- 		* The controller will be taken offline by the OS now.
- 		*/
--		writel(MFI_STOP_ADP,
++		/*
++		* Send signal to FW to stop processing any pending cmds.
++		* The controller will be taken offline by the OS now.
++		*/
 +		if ((instance->pdev->device ==
 +			PCI_DEVICE_ID_LSI_SAS0073SKINNY) ||
 +			(instance->pdev->device ==
@@ -2526,67 +2491,168 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
 +				&instance->reg_set->reserved_0);
 +		} else {
 +			writel(MFI_STOP_ADP,
- 				&instance->reg_set->inbound_doorbell);
++				&instance->reg_set->inbound_doorbell);
 +		}
- 		megasas_dump_pending_frames(instance);
--		instance->hw_crit_error = 1;
++		megasas_dump_pending_frames(instance);
 +		spin_lock_irqsave(&instance->hba_lock, flags);
 +		instance->adprecovery	= MEGASAS_HW_CRITICAL_ERROR;
 +		spin_unlock_irqrestore(&instance->hba_lock, flags);
- 		return FAILED;
- 	}
- 
++		return FAILED;
++	}
++
 +	printk("megaraid_sas: no more pending commands remain after reset handling.\n");
 +
- 	return SUCCESS;
- }
- 
-@@ -985,7 +2830,7 @@ static int megasas_generic_reset(struct 
- 	scmd_printk(KERN_NOTICE, scmd, "megasas: RESET -%ld cmd=%x retries=%x\n",
- 		 scmd->serial_number, scmd->cmnd[0], scmd->retries);
- 
--	if (instance->hw_crit_error) {
++	return SUCCESS;
++}
++
++/**
++ * megasas_generic_reset -	Generic reset routine
++ * @scmd:			Mid-layer SCSI command
++ *
++ * This routine implements a generic reset handler for device, bus and host
++ * reset requests. Device, bus and host specific reset handlers can use this
++ * function after they do their specific tasks.
++ */
++static int megasas_generic_reset(struct scsi_cmnd *scmd)
++{
++	int ret_val;
++	struct megasas_instance *instance;
++
++	instance = (struct megasas_instance *)scmd->device->host->hostdata;
++
++	scmd_printk(KERN_NOTICE, scmd, "megasas: RESET -%ld cmd=%x retries=%x\n",
++		 scmd->serial_number, scmd->cmnd[0], scmd->retries);
++
 +	if (instance->adprecovery == MEGASAS_HW_CRITICAL_ERROR) {
- 		printk(KERN_ERR "megasas: cannot recover from previous reset "
- 		       "failures\n");
- 		return FAILED;
-@@ -1008,7 +2853,7 @@ static int megasas_generic_reset(struct 
-  * cmd has not been completed within the timeout period.
-  */
- static enum
--scsi_eh_timer_return megasas_reset_timer(struct scsi_cmnd *scmd)
-+blk_eh_timer_return megasas_reset_timer(struct scsi_cmnd *scmd)
- {
- 	struct megasas_cmd *cmd = (struct megasas_cmd *)scmd->SCp.ptr;
- 	struct megasas_instance *instance;
-@@ -1016,7 +2861,7 @@ scsi_eh_timer_return megasas_reset_timer
- 
- 	if (time_after(jiffies, scmd->jiffies_at_alloc +
- 				(MEGASAS_DEFAULT_CMD_TIMEOUT * 2) * HZ)) {
--		return EH_NOT_HANDLED;
-+		return BLK_EH_NOT_HANDLED;
- 	}
- 
- 	instance = cmd->instance;
-@@ -1030,7 +2875,7 @@ scsi_eh_timer_return megasas_reset_timer
- 
- 		spin_unlock_irqrestore(instance->host->host_lock, flags);
- 	}
--	return EH_RESET_TIMER;
-+	return BLK_EH_RESET_TIMER;
- }
- 
- /**
-@@ -1106,6 +2951,8 @@ megasas_bios_param(struct scsi_device *s
- 	return 0;
- }
- 
++		printk(KERN_ERR "megasas: cannot recover from previous reset "
++		       "failures\n");
++		return FAILED;
++	}
++
++	ret_val = megasas_wait_for_outstanding(instance);
++	if (ret_val == SUCCESS)
++		printk(KERN_NOTICE "megasas: reset successful \n");
++	else
++		printk(KERN_ERR "megasas: failed to do reset\n");
++
++	return ret_val;
++}
++
++/**
++ * megasas_reset_timer - quiesce the adapter if required
++ * @scmd:		scsi cmnd
++ *
++ * Sets the FW busy flag and reduces the host->can_queue if the
++ * cmd has not been completed within the timeout period.
++ */
++static enum
++scsi_eh_timer_return megasas_reset_timer(struct scsi_cmnd *scmd)
++{
++	struct megasas_cmd *cmd = (struct megasas_cmd *)scmd->SCp.ptr;
++	struct megasas_instance *instance;
++	unsigned long flags;
++
++	if (time_after(jiffies, scmd->jiffies_at_alloc +
++				(MEGASAS_DEFAULT_CMD_TIMEOUT * 2) * HZ)) {
++		return EH_NOT_HANDLED;
++	}
++
++	instance = cmd->instance;
++	if (!(instance->flag & MEGASAS_FW_BUSY)) {
++		/* FW is busy, throttle IO */
++		spin_lock_irqsave(instance->host->host_lock, flags);
++
++		instance->host->can_queue = 16;
++		instance->last_time = jiffies;
++		instance->flag |= MEGASAS_FW_BUSY;
++
++		spin_unlock_irqrestore(instance->host->host_lock, flags);
++	}
++	return EH_RESET_TIMER;
++}
++
++/**
++ * megasas_reset_device -	Device reset handler entry point
++ */
++static int megasas_reset_device(struct scsi_cmnd *scmd)
++{
++	int ret;
++
++	/*
++	 * First wait for all commands to complete
++	 */
++	ret = megasas_generic_reset(scmd);
++
++	return ret;
++}
++
++/**
++ * megasas_reset_bus_host -	Bus & host reset handler entry point
++ */
++static int megasas_reset_bus_host(struct scsi_cmnd *scmd)
++{
++	int ret;
++
++	/*
++	 * First wait for all commands to complete
++	 */
++	ret = megasas_generic_reset(scmd);
++
++	return ret;
++}
++
++/**
++ * megasas_bios_param - Returns disk geometry for a disk
++ * @sdev: 		device handle
++ * @bdev:		block device
++ * @capacity:		drive capacity
++ * @geom:		geometry parameters
++ */
++static int
++megasas_bios_param(struct scsi_device *sdev, struct block_device *bdev,
++		 sector_t capacity, int geom[])
++{
++	int heads;
++	int sectors;
++	sector_t cylinders;
++	unsigned long tmp;
++	/* Default heads (64) & sectors (32) */
++	heads = 64;
++	sectors = 32;
++
++	tmp = heads * sectors;
++	cylinders = capacity;
++
++	sector_div(cylinders, tmp);
++
++	/*
++	 * Handle extended translation size for logical drives > 1Gb
++	 */
++
++	if (capacity >= 0x200000) {
++		heads = 255;
++		sectors = 63;
++		tmp = heads*sectors;
++		cylinders = capacity;
++		sector_div(cylinders, tmp);
++	}
++
++	geom[0] = heads;
++	geom[1] = sectors;
++	geom[2] = cylinders;
++
++	return 0;
++}
++
 +static void megasas_aen_polling(struct work_struct *work);
 +
- /**
-  * megasas_service_aen -	Processes an event notification
-  * @instance:			Adapter soft state
-@@ -1121,27 +2968,74 @@ megasas_bios_param(struct scsi_device *s
++/**
++ * megasas_service_aen -	Processes an event notification
++ * @instance:			Adapter soft state
+  * @cmd:			AEN command completed by the ISR
+  *
+  * For AEN, driver sends a command down to FW that is held by the FW till an
+@@ -1121,27 +3026,74 @@ megasas_bios_param(struct scsi_device *s
  static void
  megasas_service_aen(struct megasas_instance *instance, struct megasas_cmd *cmd)
  {
@@ -2621,8 +2687,8 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
 +				(struct delayed_work *)&ev->hotplug_work, 0);
 +		}
 +	}
-+}
-+
+ }
+ 
 +static int megasas_slave_alloc(struct scsi_device *sdev)
 +{
 +	u16		pd_index = 0;
@@ -2646,8 +2712,8 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
 +		return -ENXIO;
 +	}
 +	return 0;
- }
- 
++}
++
 +
  /*
   * Scsi host template for megaraid_sas driver
@@ -2663,53 +2729,44 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  	.queuecommand = megasas_queue_command,
  	.eh_device_reset_handler = megasas_reset_device,
  	.eh_bus_reset_handler = megasas_reset_bus_host,
-@@ -1195,45 +3089,6 @@ megasas_complete_abort(struct megasas_in
+@@ -1193,7 +3145,6 @@ megasas_complete_abort(struct megasas_in
+ 
+ 	return;
+ }
+-
+ /**
+  * megasas_unmap_sgbuf -	Unmap SG buffers
+  * @instance:			Adapter soft state
+@@ -1217,12 +3168,18 @@ megasas_unmap_sgbuf(struct megasas_insta
+ 	opcode = cmd->frame->hdr.cmd;
+ 
+ 	if ((opcode == MFI_CMD_LD_READ) || (opcode == MFI_CMD_LD_WRITE)) {
+-		if (IS_DMA64)
++		if (instance->flag_ieee) {
++			buf_h = cmd->frame->io.sgl.sge_skinny[0].phys_addr;
++
++		} else if (IS_DMA64)
+ 			buf_h = cmd->frame->io.sgl.sge64[0].phys_addr;
+ 		else
+ 			buf_h = cmd->frame->io.sgl.sge32[0].phys_addr;
+ 	} else {
+-		if (IS_DMA64)
++		if (instance->flag_ieee) {
++			buf_h = cmd->frame->pthru.sgl.sge_skinny[0].phys_addr;
++
++		} else if (IS_DMA64)
+ 			buf_h = cmd->frame->pthru.sgl.sge64[0].phys_addr;
+ 		else
+ 			buf_h = cmd->frame->pthru.sgl.sge32[0].phys_addr;
+@@ -1233,6 +3190,7 @@ megasas_unmap_sgbuf(struct megasas_insta
+ 	return;
  }
  
++
  /**
-- * megasas_unmap_sgbuf -	Unmap SG buffers
-- * @instance:			Adapter soft state
-- * @cmd:			Completed command
-- */
--static void
--megasas_unmap_sgbuf(struct megasas_instance *instance, struct megasas_cmd *cmd)
--{
--	dma_addr_t buf_h;
--	u8 opcode;
--
--	if (cmd->scmd->use_sg) {
--		pci_unmap_sg(instance->pdev, cmd->scmd->request_buffer,
--			     cmd->scmd->use_sg, cmd->scmd->sc_data_direction);
--		return;
--	}
--
--	if (!cmd->scmd->request_bufflen)
--		return;
--
--	opcode = cmd->frame->hdr.cmd;
--
--	if ((opcode == MFI_CMD_LD_READ) || (opcode == MFI_CMD_LD_WRITE)) {
--		if (IS_DMA64)
--			buf_h = cmd->frame->io.sgl.sge64[0].phys_addr;
--		else
--			buf_h = cmd->frame->io.sgl.sge32[0].phys_addr;
--	} else {
--		if (IS_DMA64)
--			buf_h = cmd->frame->pthru.sgl.sge64[0].phys_addr;
--		else
--			buf_h = cmd->frame->pthru.sgl.sge32[0].phys_addr;
--	}
--
--	pci_unmap_single(instance->pdev, buf_h, cmd->scmd->request_bufflen,
--			 cmd->scmd->sc_data_direction);
--	return;
--}
--
--/**
   * megasas_complete_cmd -	Completes a command
   * @instance:			Adapter soft state
-  * @cmd:			Command to be completed
-@@ -1247,9 +3102,14 @@ static void
+@@ -1247,9 +3205,14 @@ static void
  megasas_complete_cmd(struct megasas_instance *instance, struct megasas_cmd *cmd,
  		     u8 alt_status)
  {
@@ -2724,25 +2781,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  	if (cmd->scmd)
  		cmd->scmd->SCp.ptr = NULL;
  
-@@ -1281,7 +3141,7 @@ megasas_complete_cmd(struct megasas_inst
- 
- 			atomic_dec(&instance->fw_outstanding);
- 
--			megasas_unmap_sgbuf(instance, cmd);
-+			scsi_dma_unmap(cmd->scmd);
- 			cmd->scmd->scsi_done(cmd->scmd);
- 			megasas_return_cmd(instance, cmd);
- 
-@@ -1329,7 +3189,7 @@ megasas_complete_cmd(struct megasas_inst
- 
- 		atomic_dec(&instance->fw_outstanding);
- 
--		megasas_unmap_sgbuf(instance, cmd);
-+		scsi_dma_unmap(cmd->scmd);
- 		cmd->scmd->scsi_done(cmd->scmd);
- 		megasas_return_cmd(instance, cmd);
- 
-@@ -1338,6 +3198,12 @@ megasas_complete_cmd(struct megasas_inst
+@@ -1338,6 +3301,12 @@ megasas_complete_cmd(struct megasas_inst
  	case MFI_CMD_SMP:
  	case MFI_CMD_STP:
  	case MFI_CMD_DCMD:
@@ -2755,7 +2794,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  
  		/*
  		 * See if got an event notification
-@@ -1364,39 +3230,286 @@ megasas_complete_cmd(struct megasas_inst
+@@ -1364,39 +3333,286 @@ megasas_complete_cmd(struct megasas_inst
  }
  
  /**
@@ -3056,7 +3095,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  }
  
  /**
-@@ -1415,6 +3528,7 @@ megasas_transition_to_ready(struct megas
+@@ -1415,6 +3631,7 @@ megasas_transition_to_ready(struct megas
  	u8 max_wait;
  	u32 fw_state;
  	u32 cur_state;
@@ -3064,7 +3103,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  
  	fw_state = instance->instancet->read_fw_status_reg(instance->reg_set) & MFI_STATE_MASK;
  
-@@ -1424,6 +3538,8 @@ megasas_transition_to_ready(struct megas
+@@ -1424,6 +3641,8 @@ megasas_transition_to_ready(struct megas
  
  	while (fw_state != MFI_STATE_READY) {
  
@@ -3073,7 +3112,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  		switch (fw_state) {
  
  		case MFI_STATE_FAULT:
-@@ -1435,18 +3551,36 @@ megasas_transition_to_ready(struct megas
+@@ -1435,18 +3654,36 @@ megasas_transition_to_ready(struct megas
  			/*
  			 * Set the CLR bit in inbound doorbell
  			 */
@@ -3116,7 +3155,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  			cur_state = MFI_STATE_BOOT_MESSAGE_PENDING;
  			break;
  
-@@ -1455,9 +3589,17 @@ megasas_transition_to_ready(struct megas
+@@ -1455,9 +3692,17 @@ megasas_transition_to_ready(struct megas
  			 * Bring it to READY state; assuming max wait 10 secs
  			 */
  			instance->instancet->disable_intr(instance->reg_set);
@@ -3136,7 +3175,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  			cur_state = MFI_STATE_OPERATIONAL;
  			break;
  
-@@ -1465,32 +3607,32 @@ megasas_transition_to_ready(struct megas
+@@ -1465,32 +3710,32 @@ megasas_transition_to_ready(struct megas
  			/*
  			 * This state should not last for more than 2 seconds
  			 */
@@ -3175,7 +3214,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  			cur_state = MFI_STATE_FLUSH_CACHE;
  			break;
  
-@@ -1506,8 +3648,10 @@ megasas_transition_to_ready(struct megas
+@@ -1506,8 +3751,10 @@ megasas_transition_to_ready(struct megas
  		for (i = 0; i < (max_wait * 1000); i++) {
  			fw_state = instance->instancet->read_fw_status_reg(instance->reg_set) &  
  					MFI_STATE_MASK ;
@@ -3187,7 +3226,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  				msleep(1);
  			} else
  				break;
-@@ -1516,12 +3660,12 @@ megasas_transition_to_ready(struct megas
+@@ -1516,12 +3763,12 @@ megasas_transition_to_ready(struct megas
  		/*
  		 * Return error if fw_state hasn't changed after max_wait
  		 */
@@ -3202,7 +3241,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
   	printk(KERN_INFO "megasas: FW now in Ready state\n");
  
  	return 0;
-@@ -1594,11 +3738,16 @@ static int megasas_create_frame_pool(str
+@@ -1594,11 +3841,16 @@ static int megasas_create_frame_pool(str
  	sge_sz = (IS_DMA64) ? sizeof(struct megasas_sge64) :
  	    sizeof(struct megasas_sge32);
  
@@ -3219,7 +3258,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  
  	/*
  	 * We need one extra frame for the MFI command
-@@ -1655,7 +3804,15 @@ static int megasas_create_frame_pool(str
+@@ -1655,7 +3907,15 @@ static int megasas_create_frame_pool(str
  			return -ENOMEM;
  		}
  
@@ -3235,7 +3274,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  	}
  
  	return 0;
-@@ -1714,8 +3871,7 @@ static int megasas_alloc_cmds(struct meg
+@@ -1714,8 +3974,7 @@ static int megasas_alloc_cmds(struct meg
  	 * Allocate the dynamic array first and then allocate individual
  	 * commands.
  	 */
@@ -3245,7 +3284,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  
  	if (!instance->cmd_list) {
  		printk(KERN_DEBUG "megasas: out of memory\n");
-@@ -1747,6 +3903,7 @@ static int megasas_alloc_cmds(struct meg
+@@ -1747,6 +4006,7 @@ static int megasas_alloc_cmds(struct meg
  		cmd = instance->cmd_list[i];
  		memset(cmd, 0, sizeof(struct megasas_cmd));
  		cmd->index = i;
@@ -3253,7 +3292,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  		cmd->instance = instance;
  
  		list_add_tail(&cmd->list, &instance->cmd_pool);
-@@ -1763,6 +3920,181 @@ static int megasas_alloc_cmds(struct meg
+@@ -1763,6 +4023,181 @@ static int megasas_alloc_cmds(struct meg
  	return 0;
  }
  
@@ -3435,7 +3474,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  /**
   * megasas_get_controller_info -	Returns FW's controller structure
   * @instance:				Adapter soft state
-@@ -1808,6 +4140,7 @@ megasas_get_ctrl_info(struct megasas_ins
+@@ -1808,6 +4243,7 @@ megasas_get_ctrl_info(struct megasas_ins
  	dcmd->sge_count = 1;
  	dcmd->flags = MFI_FRAME_DIR_READ;
  	dcmd->timeout = 0;
@@ -3443,7 +3482,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  	dcmd->data_xfer_len = sizeof(struct megasas_ctrl_info);
  	dcmd->opcode = MR_DCMD_CTRL_GET_INFO;
  	dcmd->sgl.sge32[0].phys_addr = ci_h;
-@@ -1827,58 +4160,276 @@ megasas_get_ctrl_info(struct megasas_ins
+@@ -1827,58 +4263,276 @@ megasas_get_ctrl_info(struct megasas_ins
  	return ret;
  }
  
@@ -3755,7 +3794,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  }
  
  /**
-@@ -1893,22 +4444,24 @@ static int megasas_init_mfi(struct megas
+@@ -1893,22 +4547,24 @@ static int megasas_init_mfi(struct megas
  	u32 reply_q_sz;
  	u32 max_sectors_1;
  	u32 max_sectors_2;
@@ -3790,7 +3829,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  		printk(KERN_DEBUG "megasas: IO memory region busy!\n");
  		return -EBUSY;
  	}
-@@ -1924,9 +4477,18 @@ static int megasas_init_mfi(struct megas
+@@ -1924,9 +4580,18 @@ static int megasas_init_mfi(struct megas
  
  	switch(instance->pdev->device)
  	{
@@ -3810,7 +3849,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  		case PCI_DEVICE_ID_LSI_SAS1064R:
  		case PCI_DEVICE_ID_DELL_PERC5:
  		default:
-@@ -1979,52 +4541,29 @@ static int megasas_init_mfi(struct megas
+@@ -1979,52 +4644,29 @@ static int megasas_init_mfi(struct megas
  		goto fail_reply_queue;
  	}
  
@@ -3881,7 +3920,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  
  	ctrl_info = kmalloc(sizeof(struct megasas_ctrl_info), GFP_KERNEL);
  
-@@ -2037,17 +4576,21 @@ static int megasas_init_mfi(struct megas
+@@ -2037,17 +4679,21 @@ static int megasas_init_mfi(struct megas
  	 * Note that older firmwares ( < FW ver 30) didn't report information
  	 * to calculate max_sectors_1. So the number ended up as zero always.
  	 */
@@ -3908,7 +3947,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  
  	kfree(ctrl_info);
  
-@@ -2055,12 +4598,17 @@ static int megasas_init_mfi(struct megas
+@@ -2055,12 +4701,17 @@ static int megasas_init_mfi(struct megas
  	* Setup tasklet for cmd completion
  	*/
  
@@ -3929,7 +3968,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  
  	pci_free_consistent(instance->pdev, reply_q_sz,
  			    instance->reply_queue, instance->reply_queue_h);
-@@ -2072,7 +4620,8 @@ static int megasas_init_mfi(struct megas
+@@ -2072,7 +4723,8 @@ static int megasas_init_mfi(struct megas
  	iounmap(instance->reg_set);
  
        fail_ioremap:
@@ -3939,7 +3978,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  
  	return -EINVAL;
  }
-@@ -2092,7 +4641,10 @@ static void megasas_release_mfi(struct m
+@@ -2092,7 +4744,10 @@ static void megasas_release_mfi(struct m
  
  	iounmap(instance->reg_set);
  
@@ -3951,7 +3990,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  }
  
  /**
-@@ -2140,6 +4692,7 @@ megasas_get_seq_num(struct megasas_insta
+@@ -2140,6 +4795,7 @@ megasas_get_seq_num(struct megasas_insta
  	dcmd->sge_count = 1;
  	dcmd->flags = MFI_FRAME_DIR_READ;
  	dcmd->timeout = 0;
@@ -3959,7 +3998,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  	dcmd->data_xfer_len = sizeof(struct megasas_evt_log_info);
  	dcmd->opcode = MR_DCMD_CTRL_EVENT_GET_INFO;
  	dcmd->sgl.sge32[0].phys_addr = el_info_h;
-@@ -2215,6 +4768,8 @@ megasas_register_aen(struct megasas_inst
+@@ -2215,6 +4871,8 @@ megasas_register_aen(struct megasas_inst
  			 * Previously issued event registration includes
  			 * current request. Nothing to do.
  			 */
@@ -3968,7 +4007,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  			return 0;
  		} else {
  			curr_aen.members.locale |= prev_aen.members.locale;
-@@ -2254,13 +4809,20 @@ megasas_register_aen(struct megasas_inst
+@@ -2254,13 +4912,20 @@ megasas_register_aen(struct megasas_inst
  	dcmd->sge_count = 1;
  	dcmd->flags = MFI_FRAME_DIR_READ;
  	dcmd->timeout = 0;
@@ -3989,7 +4028,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  	/*
  	 * Store reference to the cmd used to register for AEN. When an
  	 * application wants us to register for AEN, we have to abort this
-@@ -2271,7 +4833,8 @@ megasas_register_aen(struct megasas_inst
+@@ -2271,7 +4936,8 @@ megasas_register_aen(struct megasas_inst
  	/*
  	 * Issue the aen registration frame
  	 */
@@ -3999,7 +4038,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  
  	return 0;
  }
-@@ -2304,6 +4867,32 @@ static int megasas_start_aen(struct mega
+@@ -2304,6 +4970,30 @@ static int megasas_start_aen(struct mega
  				    class_locale.word);
  }
  
@@ -4007,16 +4046,14 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
 +sysfs_max_sectors_read(struct kobject *kobj, struct bin_attribute *bin_attr,
 +                       char *buf, loff_t off, size_t count)
 +{
-+       struct device *dev = container_of(kobj, struct device, kobj);
++	struct Scsi_Host *host = class_to_shost(container_of(kobj,
++					struct class_device, kobj));
++	struct megasas_instance *instance = 
++				(struct megasas_instance *)host->hostdata;
 +
-+       struct Scsi_Host *host = class_to_shost(dev);
++	count = sprintf(buf,"%u\n", instance->max_sectors_per_req);
 +
-+       struct megasas_instance *instance =
-+                               (struct megasas_instance *)host->hostdata;
-+
-+       count = sprintf(buf,"%u\n", instance->max_sectors_per_req);
-+
-+       return count+1;
++	return count+1;
 +}
 +
 +static struct bin_attribute sysfs_max_sectors_attr = {
@@ -4032,7 +4069,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  /**
   * megasas_io_attach -	Attaches this driver to SCSI mid-layer
   * @instance:		Adapter soft state
-@@ -2311,17 +4900,48 @@ static int megasas_start_aen(struct mega
+@@ -2311,17 +5001,48 @@ static int megasas_start_aen(struct mega
  static int megasas_io_attach(struct megasas_instance *instance)
  {
  	struct Scsi_Host *host = instance->host;
@@ -4083,21 +4120,19 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  	host->max_channel = MEGASAS_MAX_CHANNELS - 1;
  	host->max_id = MEGASAS_MAX_DEV_PER_CHANNEL;
  	host->max_lun = MEGASAS_MAX_LUN;
-@@ -2335,11 +4955,50 @@ static int megasas_io_attach(struct mega
+@@ -2335,11 +5056,48 @@ static int megasas_io_attach(struct mega
  		return -ENODEV;
  	}
  
 +        /*
 +        * Create sysfs entries for module paramaters
 +        */
-+       error = sysfs_create_bin_file(&instance->host->shost_dev.kobj,
-+                       &sysfs_max_sectors_attr);
-+
-+       if (error) {
-+               printk(KERN_INFO "megasas: Error in creating the sysfs entry"
-+                               " max_sectors.\n");
-+               goto out_remove_host;
-+       }
++	error = sysfs_create_bin_file(&instance->host->shost_classdev.kobj,
++			&sysfs_max_sectors_attr);
++	if (error) {
++		printk(KERN_INFO "megasas: Error in creating the sysfs entry max_sectors.\n");
++		goto out_remove_host;
++	}
 +
  	/*
  	 * Trigger SCSI to scan our drives
@@ -4118,13 +4153,13 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
 +	 * All our contollers are capable of performing 64-bit DMA
 +	 */
 +	if (IS_DMA64) {
-+		if (pci_set_dma_mask(pdev, DMA_BIT_MASK(64)) != 0) {
++		if (pci_set_dma_mask(pdev, DMA_64BIT_MASK) != 0) {
 +
-+			if (pci_set_dma_mask(pdev, DMA_BIT_MASK(32)) != 0)
++			if (pci_set_dma_mask(pdev, DMA_32BIT_MASK) != 0)
 +				goto fail_set_dma_mask;
 +		}
 +	} else {
-+		if (pci_set_dma_mask(pdev, DMA_BIT_MASK(32)) != 0)
++		if (pci_set_dma_mask(pdev, DMA_32BIT_MASK) != 0)
 +			goto fail_set_dma_mask;
 +	}
 +	return 0;
@@ -4134,7 +4169,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  }
  
  /**
-@@ -2375,19 +5034,8 @@ megasas_probe_one(struct pci_dev *pdev, 
+@@ -2375,19 +5133,8 @@ megasas_probe_one(struct pci_dev *pdev, 
  
  	pci_set_master(pdev);
  
@@ -4156,7 +4191,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  
  	host = scsi_host_alloc(&megasas_template,
  			       sizeof(struct megasas_instance));
-@@ -2399,6 +5047,7 @@ megasas_probe_one(struct pci_dev *pdev, 
+@@ -2399,6 +5146,7 @@ megasas_probe_one(struct pci_dev *pdev, 
  
  	instance = (struct megasas_instance *)host->hostdata;
  	memset(instance, 0, sizeof(*instance));
@@ -4164,7 +4199,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  
  	instance->producer = pci_alloc_consistent(pdev, sizeof(u32),
  						  &instance->producer_h);
-@@ -2413,6 +5062,11 @@ megasas_probe_one(struct pci_dev *pdev, 
+@@ -2413,6 +5161,11 @@ megasas_probe_one(struct pci_dev *pdev, 
  
  	*instance->producer = 0;
  	*instance->consumer = 0;
@@ -4176,7 +4211,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  
  	instance->evt_detail = pci_alloc_consistent(pdev,
  						    sizeof(struct
-@@ -2429,6 +5083,7 @@ megasas_probe_one(struct pci_dev *pdev, 
+@@ -2429,6 +5182,7 @@ megasas_probe_one(struct pci_dev *pdev, 
  	 * Initialize locks and queues
  	 */
  	INIT_LIST_HEAD(&instance->cmd_pool);
@@ -4184,7 +4219,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  
  	atomic_set(&instance->fw_outstanding,0);
  
-@@ -2436,9 +5091,12 @@ megasas_probe_one(struct pci_dev *pdev, 
+@@ -2436,9 +5190,12 @@ megasas_probe_one(struct pci_dev *pdev, 
  	init_waitqueue_head(&instance->abort_cmd_wait_q);
  
  	spin_lock_init(&instance->cmd_pool_lock);
@@ -4199,7 +4234,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  
  	/*
  	 * Initialize PCI related and misc parameters
-@@ -2448,9 +5106,20 @@ megasas_probe_one(struct pci_dev *pdev, 
+@@ -2448,9 +5205,20 @@ megasas_probe_one(struct pci_dev *pdev, 
  	instance->unique_id = pdev->bus->number << 8 | pdev->devfn;
  	instance->init_id = MEGASAS_DEFAULT_INIT_ID;
  
@@ -4220,7 +4255,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  
  	/*
  	 * Initialize MFI Firmware
-@@ -2495,6 +5164,7 @@ megasas_probe_one(struct pci_dev *pdev, 
+@@ -2495,6 +5263,7 @@ megasas_probe_one(struct pci_dev *pdev, 
  	if (megasas_io_attach(instance))
  		goto fail_io_attach;
  
@@ -4228,7 +4263,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  	return 0;
  
        fail_start_aen:
-@@ -2541,83 +5211,266 @@ static void megasas_flush_cache(struct m
+@@ -2541,83 +5310,266 @@ static void megasas_flush_cache(struct m
  	struct megasas_cmd *cmd;
  	struct megasas_dcmd_frame *dcmd;
  
@@ -4539,7 +4574,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  	tasklet_kill(&instance->isr_tasklet);
  
  	/*
-@@ -2666,7 +5519,9 @@ static void megasas_detach_one(struct pc
+@@ -2666,7 +5618,9 @@ static void megasas_detach_one(struct pc
  static void megasas_shutdown(struct pci_dev *pdev)
  {
  	struct megasas_instance *instance = pci_get_drvdata(pdev);
@@ -4549,15 +4584,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  }
  
  /**
-@@ -2674,6 +5529,7 @@ static void megasas_shutdown(struct pci_
-  */
- static int megasas_mgmt_open(struct inode *inode, struct file *filep)
- {
-+	cycle_kernel_lock();
- 	/*
- 	 * Allow only those users with admin rights
- 	 */
-@@ -2722,6 +5578,23 @@ static int megasas_mgmt_fasync(int fd, s
+@@ -2722,6 +5676,23 @@ static int megasas_mgmt_fasync(int fd, s
  }
  
  /**
@@ -4581,7 +4608,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
   * megasas_mgmt_fw_ioctl -	Issues management ioctls to FW
   * @instance:			Adapter soft state
   * @argp:			User's ioctl packet
-@@ -2738,7 +5611,7 @@ megasas_mgmt_fw_ioctl(struct megasas_ins
+@@ -2738,7 +5709,7 @@ megasas_mgmt_fw_ioctl(struct megasas_ins
  	int error = 0, i;
  	void *sense = NULL;
  	dma_addr_t sense_handle;
@@ -4590,7 +4617,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  
  	memset(kbuff_arr, 0, sizeof(kbuff_arr));
  
-@@ -2762,6 +5635,7 @@ megasas_mgmt_fw_ioctl(struct megasas_ins
+@@ -2762,6 +5733,7 @@ megasas_mgmt_fw_ioctl(struct megasas_ins
  	 */
  	memcpy(cmd->frame, ioc->frame.raw, 2 * MEGAMFI_FRAME_SIZE);
  	cmd->frame->hdr.context = cmd->index;
@@ -4598,7 +4625,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  
  	/*
  	 * The management interface between applications and the fw uses
-@@ -2815,7 +5689,7 @@ megasas_mgmt_fw_ioctl(struct megasas_ins
+@@ -2815,7 +5787,7 @@ megasas_mgmt_fw_ioctl(struct megasas_ins
  		}
  
  		sense_ptr =
@@ -4607,7 +4634,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  		*sense_ptr = sense_handle;
  	}
  
-@@ -2843,14 +5717,16 @@ megasas_mgmt_fw_ioctl(struct megasas_ins
+@@ -2843,14 +5815,16 @@ megasas_mgmt_fw_ioctl(struct megasas_ins
  	 */
  	if (ioc->sense_len) {
  		/*
@@ -4627,7 +4654,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  			error = -EFAULT;
  			goto out;
  		}
-@@ -2881,20 +5757,6 @@ megasas_mgmt_fw_ioctl(struct megasas_ins
+@@ -2881,20 +5855,6 @@ megasas_mgmt_fw_ioctl(struct megasas_ins
  	return error;
  }
  
@@ -4648,7 +4675,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  static int megasas_mgmt_ioctl_fw(struct file *file, unsigned long arg)
  {
  	struct megasas_iocpacket __user *user_ioc =
-@@ -2902,6 +5764,9 @@ static int megasas_mgmt_ioctl_fw(struct 
+@@ -2902,6 +5862,9 @@ static int megasas_mgmt_ioctl_fw(struct 
  	struct megasas_iocpacket *ioc;
  	struct megasas_instance *instance;
  	int error;
@@ -4658,7 +4685,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  
  	ioc = kmalloc(sizeof(*ioc), GFP_KERNEL);
  	if (!ioc)
-@@ -2918,6 +5783,17 @@ static int megasas_mgmt_ioctl_fw(struct 
+@@ -2918,6 +5881,17 @@ static int megasas_mgmt_ioctl_fw(struct 
  		goto out_kfree_ioc;
  	}
  
@@ -4676,7 +4703,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  	/*
  	 * We will allow only MEGASAS_INT_CMDS number of parallel ioctl cmds
  	 */
-@@ -2925,6 +5801,35 @@ static int megasas_mgmt_ioctl_fw(struct 
+@@ -2925,6 +5899,35 @@ static int megasas_mgmt_ioctl_fw(struct 
  		error = -ERESTARTSYS;
  		goto out_kfree_ioc;
  	}
@@ -4712,7 +4739,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  	error = megasas_mgmt_fw_ioctl(instance, user_ioc, ioc);
  	up(&instance->ioctl_sem);
  
-@@ -2938,6 +5843,9 @@ static int megasas_mgmt_ioctl_aen(struct
+@@ -2938,6 +5941,9 @@ static int megasas_mgmt_ioctl_aen(struct
  	struct megasas_instance *instance;
  	struct megasas_aen aen;
  	int error;
@@ -4722,7 +4749,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  
  	if (file->private_data != file) {
  		printk(KERN_DEBUG "megasas: fasync_helper was not "
-@@ -2953,10 +5861,41 @@ static int megasas_mgmt_ioctl_aen(struct
+@@ -2953,10 +5959,41 @@ static int megasas_mgmt_ioctl_aen(struct
  	if (!instance)
  		return -ENODEV;
  
@@ -4766,7 +4793,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  	return error;
  }
  
-@@ -2986,6 +5925,8 @@ static int megasas_mgmt_compat_ioctl_fw(
+@@ -2986,6 +6023,8 @@ static int megasas_mgmt_compat_ioctl_fw(
  	    compat_alloc_user_space(sizeof(struct megasas_iocpacket));
  	int i;
  	int error = 0;
@@ -4775,7 +4802,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  
  	if (clear_user(ioc, sizeof(*ioc)))
  		return -EFAULT;
-@@ -2998,9 +5939,14 @@ static int megasas_mgmt_compat_ioctl_fw(
+@@ -2998,9 +6037,14 @@ static int megasas_mgmt_compat_ioctl_fw(
  	    copy_in_user(&ioc->sge_count, &cioc->sge_count, sizeof(u32)))
  		return -EFAULT;
  
@@ -4792,7 +4819,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  		if (get_user(ptr, &cioc->sgl[i].iov_base) ||
  		    put_user(compat_ptr(ptr), &ioc->sgl[i].iov_base) ||
  		    copy_in_user(&ioc->sgl[i].iov_len,
-@@ -3042,6 +5988,7 @@ static const struct file_operations mega
+@@ -3042,6 +6086,7 @@ static const struct file_operations mega
  	.release = megasas_mgmt_release,
  	.fasync = megasas_mgmt_fasync,
  	.unlocked_ioctl = megasas_mgmt_ioctl,
@@ -4800,7 +4827,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  #ifdef CONFIG_COMPAT
  	.compat_ioctl = megasas_mgmt_compat_ioctl,
  #endif
-@@ -3056,6 +6003,8 @@ static struct pci_driver megasas_pci_dri
+@@ -3056,6 +6101,8 @@ static struct pci_driver megasas_pci_dri
  	.id_table = megasas_pci_table,
  	.probe = megasas_probe_one,
  	.remove = __devexit_p(megasas_detach_one),
@@ -4809,7 +4836,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  	.shutdown = megasas_shutdown,
  };
  
-@@ -3081,9 +6030,27 @@ static DRIVER_ATTR(release_date, S_IRUGO
+@@ -3081,9 +6128,27 @@ static DRIVER_ATTR(release_date, S_IRUGO
  		   NULL);
  
  static ssize_t
@@ -4838,7 +4865,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  }
  
  static ssize_t
-@@ -3097,8 +6064,262 @@ megasas_sysfs_set_dbg_lvl(struct device_
+@@ -3097,8 +6162,262 @@ megasas_sysfs_set_dbg_lvl(struct device_
  	return retval;
  }
  
@@ -5103,7 +5130,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  
  /**
   * megasas_init - Driver load entry point
-@@ -3113,6 +6334,9 @@ static int __init megasas_init(void)
+@@ -3113,6 +6432,9 @@ static int __init megasas_init(void)
  	printk(KERN_INFO "megasas: %s %s\n", MEGASAS_VERSION,
  	       MEGASAS_EXT_VERSION);
  
@@ -5113,7 +5140,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  	memset(&megasas_mgmt_info, 0, sizeof(megasas_mgmt_info));
  
  	/*
-@@ -3145,15 +6369,41 @@ static int __init megasas_init(void)
+@@ -3145,15 +6467,41 @@ static int __init megasas_init(void)
  				  &driver_attr_release_date);
  	if (rval)
  		goto err_dcf_rel_date;
@@ -5155,7 +5182,7 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  err_dcf_rel_date:
  	driver_remove_file(&megasas_pci_driver.driver, &driver_attr_version);
  err_dcf_attr_ver:
-@@ -3169,8 +6419,14 @@ err_pcidrv:
+@@ -3169,8 +6517,14 @@ err_pcidrv:
  static void __exit megasas_exit(void)
  {
  	driver_remove_file(&megasas_pci_driver.driver,
@@ -5170,9 +5197,9 @@ diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.c linux-2.6.22-96
  			   &driver_attr_release_date);
  	driver_remove_file(&megasas_pci_driver.driver, &driver_attr_version);
  
-diff -Nurp linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.h linux-2.6.22-960/drivers/scsi/megaraid/megaraid_sas.h
---- linux-2.6.22-950/drivers/scsi/megaraid/megaraid_sas.h	2007-07-08 19:32:17.000000000 -0400
-+++ linux-2.6.22-960/drivers/scsi/megaraid/megaraid_sas.h	2010-07-20 16:47:48.000000000 -0400
+diff -Nurp linux-2.6.22-810/drivers/scsi/megaraid/megaraid_sas.h linux-2.6.22-820/drivers/scsi/megaraid/megaraid_sas.h
+--- linux-2.6.22-810/drivers/scsi/megaraid/megaraid_sas.h	2007-07-08 19:32:17.000000000 -0400
++++ linux-2.6.22-820/drivers/scsi/megaraid/megaraid_sas.h	2010-12-03 10:42:20.000000000 -0500
 @@ -18,15 +18,21 @@
  /*
   * MegaRAID SAS Driver meta data
