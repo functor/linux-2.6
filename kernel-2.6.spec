@@ -630,6 +630,27 @@ Source79: config-debug-rhel
 Source80: config-generic-rhel
 Source81: config-powerpc64
 
+Patch1: patch-2.6.32-71.7.1.el6-vs2.3.0.36.29.4.diff
+Patch2: linux-2.6-220-delta-ptrace-fix01.patch
+Patch3: linux-2.6-250-ipsets.patch
+Patch4: linux-2.6-510-ipod.patch
+Patch5: linux-2.6-521-packet-tagging.patch
+Patch6: linux-2.6-522-iptables-connection-tagging.patch
+Patch7: linux-2.6-523-raw-sockets.patch
+Patch8: linux-2.6-524-peercred.patch
+Patch9: linux-2.6-525-sknid-elevator.patch
+Patch10: linux-2.6-527-iptables-classify-add-mark.patch
+Patch11: linux-2.6-530-built-by-support.patch
+Patch12: linux-2.6-550-raise-default-nfile-ulimit.patch
+Patch13: linux-2.6-570-tagxid.patch
+Patch14: linux-2.6-580-show-proc-virt.patch
+Patch15: linux-2.6-590-dcookies-mm.patch
+#Patch16: linux-2.6-591-chopstix-intern.patch
+Patch17: linux-2.6-640-netlink-audit-hack.patch
+Patch18: linux-2.6-650-hangcheck-reboot.patch
+Patch19: linux-2.6-660-nmi-watchdog-default.patch
+Patch20: linux-2.6-680-htb-hysteresis-tso.patch
+
 # empty final patch file to facilitate testing of kernel patches
 Patch999999: linux-kernel-test.patch
 
