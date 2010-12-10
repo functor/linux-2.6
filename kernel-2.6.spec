@@ -1026,11 +1026,6 @@ cd ..
 ###
 %build
 
-#### Planet-Lab ####
-# -Werror breaks F14 builds
-sed -i -e "s:-Wno-array-bounds -Werror:-Wno-array-bounds:g" Makefile
-#### Planet-Lab ####
-
 %if %{with_sparse}
 %define sparse_mflags	C=1
 %endif
@@ -1081,6 +1076,11 @@ BuildKernel() {
     perl -p -i -e 's/^SUBLEVEL.*/SUBLEVEL = %{upstream_sublevel}/' Makefile
     %endif
     %endif
+
+    #### Planet-Lab ####
+    # -Werror breaks F14 builds
+    sed -i -e "s:-Wno-array-bounds -Werror:-Wno-array-bounds:g" Makefile
+    #### Planet-Lab ####
 
     # and now to start the build process
 
