@@ -10,7 +10,7 @@ URL: %(echo %{url} | cut -d ' ' -f 2)
 
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 1
+%define taglevel 2
 
 %define sublevel 32
 #### Planet-Lab ####
@@ -1728,6 +1728,9 @@ fi
 %endif
 
 %changelog
+* Fri Dec 10 2010 S.Çağlar Onur <caglar@cs.princeton.edu> - linux-2.6-32-2
+- Fix F14 build problems
+
 * Wed Dec 08 2010 S.Çağlar Onur <caglar@cs.princeton.edu> - linux-2.6-32-1
 - Bump to latest RHEL6 kernel
 
