@@ -3,6 +3,17 @@ From: S.Çağlar Onur <caglar@cs.princeton.edu>
 Date: Tue, 7 Dec 2010 11:09:43 -0500
 Subject: [PATCH] linux-2.6-591-chopstix-intern.patch
 
+block/blk-core.c: In function '__generic_make_request':
+block/blk-core.c:1557: warning: assignment makes integer from pointer without a cast
+fs/exec.c: In function 'open_exec':
+fs/exec.c:698: warning: ISO C90 forbids mixed declarations and code
+fs/bio.c: In function 'bio_endio':
+fs/bio.c:1440: warning: assignment makes integer from pointer without a cast
+mm/slab.c: In function '__cache_alloc':
+mm/slab.c:3513: warning: assignment makes integer from pointer without a cast
+mm/slab.c: In function '__cache_free':
+mm/slab.c:3646: warning: assignment makes integer from pointer without a cast
+
 ---
  arch/Kconfig                     |    8 ++++
  arch/x86/kernel/asm-offsets_32.c |   25 +++++++++++
