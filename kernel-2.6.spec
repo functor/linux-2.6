@@ -1551,12 +1551,12 @@ fi\
 #### Planet-Lab ####
 %if "%{distro}" == "Fedora" && %{distrorelease} >= 12
 /sbin/new-kernel-pkg --package kernel%{?1:-%{1}} --rpmposttrans %{KVERREL}%{?1:.%{1}} || exit $?\
-%endif
-#### Planet-Lab ####
 if [ -x /sbin/weak-modules ]\
 then\
     /sbin/weak-modules --add-kernel %{KVERREL}%{?1:.%{1}} || exit $?\
 fi\
+%endif
+#### Planet-Lab ####
 
 #### Planet-Lab ####
 # make some useful links
