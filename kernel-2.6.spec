@@ -1548,11 +1548,32 @@ fi\
 %else\
 /sbin/new-kernel-pkg --package kernel%{?1:-%{1}} --mkinitrd --depmod --update %{KVERREL}%{?1:.%{1}} $NEWKERNARGS || exit $?\
 %endif}\
+#### Planet-Lab ####
+%if "%{distro}" == "Fedora" && %{distrorelease} >= 12
 /sbin/new-kernel-pkg --package kernel%{?1:-%{1}} --rpmposttrans %{KVERREL}%{?1:.%{1}} || exit $?\
+%endif
+#### Planet-Lab ####
 if [ -x /sbin/weak-modules ]\
 then\
     /sbin/weak-modules --add-kernel %{KVERREL}%{?1:.%{1}} || exit $?\
 fi\
+
+#### Planet-Lab ####
+# make some useful links
+pushd /boot > /dev/null ; {
+        ln -sf config-%{KVERREL}%{?1:.%{1}} config
+        ln -sf config-%{KVERREL}%{?1:.%{1}} configsmp
+        ln -sf initrd-%{KVERREL}%{?1:.%{1}}.img initrd-boot
+        ln -sf initrd-%{KVERREL}%{?1:.%{1}}.img initrd-bootsmp
+        ln -sf vmlinuz-%{KVERREL}%{?1:.%{1}} kernel-boot
+        ln -sf vmlinuz-%{KVERREL}%{?1:.%{1}} kernel-bootsmp
+}
+popd > /dev/null
+
+# ask for a reboot
+mkdir -p /etc/planetlab
+touch /etc/planetlab/update-reboot
+#### Planet-Lab ####
 %{nil}
 
 #
