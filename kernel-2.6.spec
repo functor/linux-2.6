@@ -130,8 +130,14 @@ Summary: The Linux kernel
 %define with_bootwrapper %{?_without_bootwrapper: 0} %{?!_without_bootwrapper: 1}
 # Want to build a the vsdo directories installed
 %define with_vdso_install %{?_without_vdso_install: 0} %{?!_without_vdso_install: 1}
+#### Planet-Lab ####
 # Use dracut instead of mkinitrd for initrd image generation
+%if "%{distro}" == "Fedora" && %{distrorelease} >= 12
 %define with_dracut       %{?_without_dracut:       0} %{?!_without_dracut:       1}
+%else
+%define with_dracut       %{?_without_dracut:       1} %{?!_without_dracut:       0}
+%endif
+#### Planet-Lab ####
 
 # Build the kernel-doc package, but don't fail the build if it botches.
 # Here "true" means "continue" and "false" means "fail the build".
@@ -454,7 +460,13 @@ Summary: The Linux kernel
 # problems with the newer kernel or lack certain things that make
 # integration in the distro harder than needed.
 #
+#### Planet-Lab ####
+%if "%{distro}" == "Fedora" && %{distrorelease} >= 12
 %define package_conflicts initscripts < 7.23, udev < 145-11, iptables < 1.3.2-1, ipw2200-firmware < 2.4, iwl4965-firmware < 228.57.2, selinux-policy-targeted < 1.25.3-14, squashfs-tools < 4.0, wireless-tools < 29-3
+%else
+%define package_conflicts initscripts < 7.23, iptables < 1.3.2-1, ipw2200-firmware < 2.4, iwl4965-firmware < 228.57.2, selinux-policy-targeted < 1.25.3-14, squashfs-tools < 4.0, wireless-tools < 29-3
+%endif
+#### Planet-Lab ####
 
 #
 # The ld.so.conf.d file we install uses syntax older ldconfig's don't grok.
@@ -477,11 +489,24 @@ Summary: The Linux kernel
 # Packages that need to be installed before the kernel is, because the %post
 # scripts use them.
 #
+#### Planet-Lab ####
+%if "%{distro}" == "Fedora" && %{distrorelease} >= 12
 %define kernel_prereq  fileutils, module-init-tools, initscripts >= 8.11.1-1, kernel-firmware >= %{rpmversion}-%{pkg_release}, grubby >= 7.0.4-1
+%else
+%define kernel_prereq  fileutils, module-init-tools, initscripts >= 8.11.1-1, kernel-firmware >= %{rpmversion}-%{pkg_release}
+%endif
+#### Planet-Lab ####
+
 %if %{with_dracut}
 %define initrd_prereq  dracut-kernel >= 002-18.git413bcf78
 %else
+#### Planet-Lab ####
+%if "%{distro}" == "Fedora" && %{distrorelease} >= 12
 %define initrd_prereq  mkinitrd >= 6.0.61-1
+%else
+%define initrd_prereq  mkinitrd >= 6.0.19-1
+%endif
+#### Planet-Lab ####
 %endif
 
 #
