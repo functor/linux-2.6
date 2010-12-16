@@ -10,7 +10,7 @@ URL: %(echo %{url} | cut -d ' ' -f 2)
 
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 2
+%define taglevel 3
 
 %define sublevel 32
 #### Planet-Lab ####
@@ -1765,6 +1765,11 @@ fi
 %endif
 
 %changelog
+* Thu Dec 16 2010 S.Çağlar Onur <caglar@cs.princeton.edu> - linux-2.6-32-3
+- Tweak vserver configs based on Daniel's suggestions
+- Add appropriate postinstall steps required by PL nodes
+- Tweak dependencies for F8 compatibility
+
 * Fri Dec 10 2010 S.Çağlar Onur <caglar@cs.princeton.edu> - linux-2.6-32-2
 - Fix F14 build problems
 
