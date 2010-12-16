@@ -1548,32 +1548,25 @@ fi\
 %else\
 /sbin/new-kernel-pkg --package kernel%{?1:-%{1}} --mkinitrd --depmod --update %{KVERREL}%{?1:.%{1}} $NEWKERNARGS || exit $?\
 %endif}\
-#### Planet-Lab ####
-%if "%{distro}" == "Fedora" && %{distrorelease} >= 12
+%if "%{distro}" == "Fedora" && %{distrorelease} >= 12\
 /sbin/new-kernel-pkg --package kernel%{?1:-%{1}} --rpmposttrans %{KVERREL}%{?1:.%{1}} || exit $?\
 if [ -x /sbin/weak-modules ]\
 then\
     /sbin/weak-modules --add-kernel %{KVERREL}%{?1:.%{1}} || exit $?\
 fi\
-%endif
-#### Planet-Lab ####
-
-#### Planet-Lab ####
+%endif\
 # make some useful links
-pushd /boot > /dev/null ; {
-        ln -sf config-%{KVERREL}%{?1:.%{1}} config
-        ln -sf config-%{KVERREL}%{?1:.%{1}} configsmp
-        ln -sf initrd-%{KVERREL}%{?1:.%{1}}.img initrd-boot
-        ln -sf initrd-%{KVERREL}%{?1:.%{1}}.img initrd-bootsmp
-        ln -sf vmlinuz-%{KVERREL}%{?1:.%{1}} kernel-boot
-        ln -sf vmlinuz-%{KVERREL}%{?1:.%{1}} kernel-bootsmp
-}
-popd > /dev/null
-
+pushd /boot\
+ln -sf config-%{KVERREL}%{?1:.%{1}} config\
+ln -sf config-%{KVERREL}%{?1:.%{1}} configsmp\
+ln -sf initrd-%{KVERREL}%{?1:.%{1}}.img initrd-boot\
+ln -sf initrd-%{KVERREL}%{?1:.%{1}}.img initrd-bootsmp\
+ln -sf vmlinuz-%{KVERREL}%{?1:.%{1}} kernel-boot\
+ln -sf vmlinuz-%{KVERREL}%{?1:.%{1}} kernel-bootsmp\
+popd\
 # ask for a reboot
-mkdir -p /etc/planetlab
-touch /etc/planetlab/update-reboot
-#### Planet-Lab ####
+mkdir -p /etc/planetlab\
+touch /etc/planetlab/update-reboot\
 %{nil}
 
 #
