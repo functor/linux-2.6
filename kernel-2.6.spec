@@ -1555,7 +1555,6 @@ then\
     /sbin/weak-modules --add-kernel %{KVERREL}%{?1:.%{1}} || exit $?\
 fi\
 %endif\
-# make some useful links
 pushd /boot > /dev/null\
 ln -sf config-%{KVERREL}%{?1:.%{1}} config\
 ln -sf config-%{KVERREL}%{?1:.%{1}} configsmp\
@@ -1564,7 +1563,6 @@ ln -sf initrd-%{KVERREL}%{?1:.%{1}}.img initrd-bootsmp\
 ln -sf vmlinuz-%{KVERREL}%{?1:.%{1}} kernel-boot\
 ln -sf vmlinuz-%{KVERREL}%{?1:.%{1}} kernel-bootsmp\
 popd > /dev/null\
-# ask for a reboot
 mkdir -p /etc/planetlab\
 touch /etc/planetlab/update-reboot\
 %{nil}
