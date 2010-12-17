@@ -563,7 +563,13 @@ Obsoletes: kernel-smp
 BuildRequires: module-init-tools, patch >= 2.5.4, bash >= 2.03, sh-utils, tar
 BuildRequires: bzip2, findutils, gzip, m4, perl, make >= 3.78, diffutils, gawk
 BuildRequires: gcc >= 3.4.2, binutils >= 2.12, redhat-rpm-config
+#### Planet-Lab ####
+%if "%{distro}" == "Fedora" && %{distrorelease} >= 14
 BuildRequires: net-tools, patchutils, rpm-build >= 4.8.0-7
+%else
+BuildRequires: net-tools, patchutils, rpm-build
+%endif
+#### Planet-Lab ####
 %if %{with_doc}
 BuildRequires: xmlto
 BuildRequires: asciidoc
