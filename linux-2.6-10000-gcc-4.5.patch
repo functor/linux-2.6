@@ -1,0 +1,65 @@
+diff --git a/arch/x86/include/asm/system.h b/arch/x86/include/asm/system.h
+index f08f973..e0fbf29 100644
+--- a/arch/x86/include/asm/system.h
++++ b/arch/x86/include/asm/system.h
+@@ -449,7 +449,7 @@ void stop_this_cpu(void *dummy);
+  *
+  * (Could use an alternative three way for this if there was one.)
+  */
+-static inline void rdtsc_barrier(void)
++static __always_inline void rdtsc_barrier(void)
+ {
+ 	alternative(ASM_NOP3, "mfence", X86_FEATURE_MFENCE_RDTSC);
+ 	alternative(ASM_NOP3, "lfence", X86_FEATURE_LFENCE_RDTSC);
+diff --git a/include/linux/syscalls.h b/include/linux/syscalls.h
+index 71c9050..3e35002 100644
+--- a/include/linux/syscalls.h
++++ b/include/linux/syscalls.h
+@@ -154,7 +154,8 @@ static void prof_sysexit_disable_##sname(struct ftrace_event_call *unused)     \
+ #define __SC_STR_TDECL6(t, a, ...)	#t, __SC_STR_TDECL5(__VA_ARGS__)
+ 
+ #define SYSCALL_TRACE_ENTER_EVENT(sname)				\
+-	static struct ftrace_event_call event_enter_##sname;		\
++	static struct ftrace_event_call					\
++	__attribute__((__aligned__(4))) event_enter_##sname;		\
+ 	struct trace_event enter_syscall_print_##sname = {		\
+ 		.trace                  = print_syscall_enter,		\
+ 	};								\
+@@ -190,7 +191,8 @@ static void prof_sysexit_disable_##sname(struct ftrace_event_call *unused)     \
+ 	}
+ 
+ #define SYSCALL_TRACE_EXIT_EVENT(sname)					\
+-	static struct ftrace_event_call event_exit_##sname;		\
++	static struct ftrace_event_call					\
++	__attribute__((__aligned__(4))) event_exit_##sname;		\
+ 	struct trace_event exit_syscall_print_##sname = {		\
+ 		.trace                  = print_syscall_exit,		\
+ 	};								\
+diff --git a/include/trace/ftrace.h b/include/trace/ftrace.h
+index bc309b2..f14d954 100644
+--- a/include/trace/ftrace.h
++++ b/include/trace/ftrace.h
+@@ -65,7 +65,8 @@
+ 	};
+ #undef DEFINE_EVENT
+ #define DEFINE_EVENT(template, name, proto, args)	\
+-	static struct ftrace_event_call event_##name
++	static struct ftrace_event_call			\
++	__attribute__((__aligned__(4))) event_##name
+ 
+ #undef DEFINE_EVENT_PRINT
+ #define DEFINE_EVENT_PRINT(template, name, proto, args, print)	\
+diff --git a/kernel/trace/trace.h b/kernel/trace/trace.h
+index 6167a38..1ad2d01 100644
+--- a/kernel/trace/trace.h
++++ b/kernel/trace/trace.h
+@@ -760,7 +760,8 @@ extern const char *__stop___trace_bprintk_fmt[];
+ 
+ #undef FTRACE_ENTRY
+ #define FTRACE_ENTRY(call, struct_name, id, tstruct, print)		\
+-	extern struct ftrace_event_call event_##call;
++	extern struct ftrace_event_call					\
++	__attribute__((__aligned__(4))) event_##call;
+ #undef FTRACE_ENTRY_DUP
+ #define FTRACE_ENTRY_DUP(call, struct_name, id, tstruct, print)		\
+ 	FTRACE_ENTRY(call, struct_name, id, PARAMS(tstruct), PARAMS(print))
