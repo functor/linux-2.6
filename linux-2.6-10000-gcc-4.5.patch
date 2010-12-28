@@ -1,3 +1,54 @@
+commit 124482935fb7fb9303c8a8ab930149c6a93d9910
+Author: Andi Kleen <andi@firstfloor.org>
+Date:   Fri Jun 18 23:09:00 2010 +0200
+
+    x86: Fix vsyscall on gcc 4.5 with -Os
+
+    This fixes the -Os breaks with gcc 4.5 bug.  rdtsc_barrier needs to be
+    force inlined, otherwise user space will jump into kernel space and
+    kill init.
+
+    This also addresses http://gcc.gnu.org/bugzilla/show_bug.cgi?id=44129
+    I believe.
+
+    Signed-off-by: Andi Kleen <ak@linux.intel.com>
+    LKML-Reference: <20100618210859.GA10913@basil.fritz.box>
+    Signed-off-by: H. Peter Anvin <hpa@linux.intel.com>
+    Cc: <stable@kernel.org>
+
+commit 86c38a31aa7f2dd6e74a262710bf8ebf7455acc5
+Author: Jeff Mahoney <jeffm@suse.com>
+Date:   Wed Feb 24 13:59:23 2010 -0500
+
+    tracing: Fix ftrace_event_call alignment for use with gcc 4.5
+
+    GCC 4.5 introduces behavior that forces the alignment of structures to
+    use the largest possible value. The default value is 32 bytes, so if
+    some structures are defined with a 4-byte alignment and others aren't
+    declared with an alignment constraint at all - it will align at 32-bytes.
+
+    For things like the ftrace events, this results in a non-standard array.
+    When initializing the ftrace subsystem, we traverse the _ftrace_events
+    section and call the initialization callback for each event. When the
+    structures are misaligned, we could be treating another part of the
+    structure (or the zeroed out space between them) as a function pointer.
+
+    This patch forces the alignment for all the ftrace_event_call structures
+    to 4 bytes.
+
+    Without this patch, the kernel fails to boot very early when built with
+    gcc 4.5.
+
+    It's trivial to check the alignment of the members of the array, so it
+    might be worthwhile to add something to the build system to do that
+    automatically. Unfortunately, that only covers this case. I've asked one
+    of the gcc developers about adding a warning when this condition is seen.
+
+   Signed-off-by: Jeff Mahoney <jeffm@suse.com>
+    LKML-Reference: <4B85770B.6010901@suse.com>
+    Signed-off-by: Steven Rostedt <rostedt@goodmis.org>
+    Cc: stable@kernel.org
+
 diff --git a/arch/x86/include/asm/system.h b/arch/x86/include/asm/system.h
 index f08f973..e0fbf29 100644
 --- a/arch/x86/include/asm/system.h
