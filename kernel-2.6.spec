@@ -1,5 +1,3 @@
-%define url $URL$
-
 Summary: The Linux kernel (the core of the Linux operating system)
 
 # What parts do we want to build?  We must build at least one kernel.
@@ -95,7 +93,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 Vendor: PlanetLab
 Packager: PlanetLab Central <support@planet-lab.org>
 Distribution: PlanetLab %{plrelease}
-URL: %(echo %{url} | cut -d ' ' -f 2)
+URL: %{SCMURL}
 
 Name: kernel
 Group: System Environment/Kernel
