@@ -10,7 +10,7 @@ URL: %{SCMURL}
 
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 5
+%define taglevel 6
 
 %define sublevel 32
 #### Planet-Lab ####
@@ -1779,6 +1779,9 @@ fi
 %endif
 
 %changelog
+* Wed Jan 05 2011 S.Çağlar Onur <caglar@cs.princeton.edu> - linux-2.6-32-6
+- Disable debuginfo packages for CentOS 5
+
 * Wed Dec 22 2010 S.Çağlar Onur <caglar@cs.princeton.edu> - linux-2.6-32-5
 - Fix problems caused by gcc 4.5.1 on F14
 
