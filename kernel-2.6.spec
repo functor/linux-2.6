@@ -124,8 +124,14 @@ Summary: The Linux kernel
 %define with_perftool  %{?_without_perftool:  0} %{?!_without_perftool:  1}
 # perf noarch subpkg
 %define with_perf      %{?_without_perf:      0} %{?!_without_perf:      1}
+#### Planet-Lab ####
 # kernel-debuginfo
+%if "%{distro}" == "CentOS" && %{distrorelease} == 5
+%define with_debuginfo %{?_without_debuginfo: 1} %{?!_without_debuginfo: 0}
+%else
 %define with_debuginfo %{?_without_debuginfo: 0} %{?!_without_debuginfo: 1}
+%endif
+#### Planet-Lab ####
 # kernel-bootwrapper (for creating zImages from kernel + initrd)
 %define with_bootwrapper %{?_without_bootwrapper: 0} %{?!_without_bootwrapper: 1}
 # Want to build a the vsdo directories installed
