@@ -10,7 +10,7 @@ URL: %{SCMURL}
 
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 6
+%define taglevel 7
 
 %define sublevel 32
 #### Planet-Lab ####
@@ -1779,6 +1779,9 @@ fi
 %endif
 
 %changelog
+* Thu Jan 06 2011 S.Çağlar Onur <caglar@cs.princeton.edu> - linux-2.6-32-7
+- Adjust mkinitrd requirement for CentOS 5
+
 * Wed Jan 05 2011 S.Çağlar Onur <caglar@cs.princeton.edu> - linux-2.6-32-6
 - Disable debuginfo packages for CentOS 5
 
