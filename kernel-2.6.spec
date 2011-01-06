@@ -510,7 +510,7 @@ Summary: The Linux kernel
 %if "%{distro}" == "Fedora" && %{distrorelease} >= 12
 %define initrd_prereq  mkinitrd >= 6.0.61-1
 %else
-%define initrd_prereq  mkinitrd >= 6.0.19-1
+%define initrd_prereq  mkinitrd >= 5.1
 %endif
 #### Planet-Lab ####
 %endif
