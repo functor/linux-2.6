@@ -86,12 +86,13 @@ trees: sources
 srpm: sources
 	mkdir -p SOURCES SRPMS
 	(cd SOURCES; rpm2cpio ../$(SOURCE_RPM) | cpio -diu; \
-	 cp ../$(notdir $(SPECFILE)) . ; cp ../linux-*.patch .; cp ../config-vserver . ; cp ../config-planetlab .; cp ../config-workarounds .; \
+	 cp ../$(notdir $(SPECFILE)) . ; cp ../linux-*.patch .; cp ../config-vserver . ; cp ../config-planetlab .; \
 	 for downloaded in $(SOURCEFILES) ; do cp ../$$downloaded . ; done ; \
 	 cat config-vserver >> config-generic ; \
 	 cat config-planetlab >> config-generic ; \
-	 cat config-workarounds >> config-generic ; \
 	 sed -i -e "s,CONFIG_IPV6=m,CONFIG_IPV6=y,g" config-generic ;\
+	 sed -i -e "s,# CONFIG_SYSFS_DEPRECATED is not set,CONFIG_SYSFS_DEPRECATED=y,g" config-generic ;\
+	 sed -i -e "s,# CONFIG_SYSFS_DEPRECATED_V2 is not set,CONFIG_SYSFS_DEPRECATED_V2=y,g" config-generic ;\
 	 sed -i -e "s,CONFIG_MODULE_SIG=y,CONFIG_MODULE_SIG=n,g" config-generic-rhel ;\
 	 sed -i -e "/\# CONFIG_KVM is not set/d" config-x86-generic-rhel)
 	./rpmmacros.sh
