@@ -1,2 +1,2 @@
-76b0135d90666e1102bc5dab0db1be02c5c2364c  http://build.planet-lab.org/third-party/kernel-2.6.32-71.7.1.el6.src.rpm
-ca101e4be57a40aaa2ae82d2173fabc04a593f2c  http://www.cs.princeton.edu/~caglar/patch-2.6.32-71.7.1.el6-vs2.3.0.36.29.4.diff
+c3c7a5f91f8de08b27f766cd5c5192256ad4b6f9  http://build.planet-lab.org/third-party/kernel-2.6.32-71.14.1.el6.src.rpm
+22d196bf39618825b2350c24f6836440bb2a8743  http://www.cs.princeton.edu/~caglar/patch-2.6.32-71.14.1.el6-vs2.3.0.36.29.4.diff
