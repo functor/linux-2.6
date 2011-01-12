@@ -10,7 +10,7 @@ URL: %{SCMURL}
 
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 8
+%define taglevel 9
 
 %define sublevel 32
 #### Planet-Lab ####
@@ -1779,6 +1779,9 @@ fi
 %endif
 
 %changelog
+* Wed Jan 12 2011 S.Çağlar Onur <caglar@cs.princeton.edu> - linux-2.6-32-9
+- bump to kernel-2.6.32-71.14.1.el6, see https://rhn.redhat.com/errata/RHSA-2011-0007.html for details
+
 * Mon Jan 10 2011 S.Çağlar Onur <caglar@cs.princeton.edu> - linux-2.6-32-8
 - Fix override: reassigning to symbol SYSFS_DEPRECATED_V2 build warning
 
