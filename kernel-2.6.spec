@@ -129,7 +129,11 @@ Summary: The Linux kernel
 %if "%{distro}" == "CentOS" && %{distrorelease} == 5
 %define with_debuginfo %{?_without_debuginfo: 1} %{?!_without_debuginfo: 0}
 %else
+%if "%{distroname}" == "f14"
+%define with_debuginfo %{?_without_debuginfo: 1} %{?!_without_debuginfo: 0}
+%else
 %define with_debuginfo %{?_without_debuginfo: 0} %{?!_without_debuginfo: 1}
+%endif
 %endif
 #### Planet-Lab ####
 # kernel-bootwrapper (for creating zImages from kernel + initrd)
