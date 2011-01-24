@@ -111,7 +111,7 @@ Summary: The Linux kernel
 # kernel-kdump
 %define with_kdump     %{?_without_kdump:     0} %{?!_without_kdump:     1}
 # kernel-debug
-%define with_debug     %{?_without_debug:     1} %{?!_without_debug:     0}
+%define with_debug     %{?_with_debug:	      1} %{?!_with_debug:        0}
 # kernel-doc
 %define with_doc       %{?_without_doc:       0} %{?!_without_doc:       1}
 # kernel-headers
@@ -130,7 +130,11 @@ Summary: The Linux kernel
 %define with_debuginfo %{?_without_debuginfo: 1} %{?!_without_debuginfo: 0}
 %else
 %if "%{distroname}" == "f14"
-%define with_debuginfo %{?_without_debuginfo: 1} %{?!_without_debuginfo: 0}
+# for now, spec2make does not understand --with or --define options
+# I'm hard-coding this for now
+%define with_debuginfo 0
+%define with_debug 0
+%define with_doc 0
 %else
 %define with_debuginfo %{?_without_debuginfo: 0} %{?!_without_debuginfo: 1}
 %endif
