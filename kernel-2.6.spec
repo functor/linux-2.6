@@ -111,7 +111,7 @@ Summary: The Linux kernel
 # kernel-kdump
 %define with_kdump     %{?_without_kdump:     0} %{?!_without_kdump:     1}
 # kernel-debug
-%define with_debug     %{?_with_debug:	      1} %{?!_with_debug:        0}
+%define with_debug     %{?_without_debug:     1} %{?!_without_debug:     0}
 # kernel-doc
 %define with_doc       %{?_without_doc:       0} %{?!_without_doc:       1}
 # kernel-headers
@@ -126,19 +126,7 @@ Summary: The Linux kernel
 %define with_perf      %{?_without_perf:      0} %{?!_without_perf:      1}
 #### Planet-Lab ####
 # kernel-debuginfo
-%if "%{distro}" == "CentOS" && %{distrorelease} == 5
 %define with_debuginfo %{?_without_debuginfo: 1} %{?!_without_debuginfo: 0}
-%else
-%if "%{distroname}" == "f14"
-# for now, spec2make does not understand --with or --define options
-# I'm hard-coding this for now
-%define with_debuginfo 0
-%define with_debug 0
-%define with_doc 0
-%else
-%define with_debuginfo %{?_without_debuginfo: 0} %{?!_without_debuginfo: 1}
-%endif
-%endif
 #### Planet-Lab ####
 # kernel-bootwrapper (for creating zImages from kernel + initrd)
 %define with_bootwrapper %{?_without_bootwrapper: 0} %{?!_without_bootwrapper: 1}
@@ -505,9 +493,9 @@ Summary: The Linux kernel
 #
 #### Planet-Lab ####
 %if "%{distro}" == "Fedora" && %{distrorelease} >= 12
-%define kernel_prereq  fileutils, module-init-tools, initscripts >= 8.11.1-1, kernel-firmware >= %{rpmversion}-%{pkg_release}, grubby >= 7.0.4-1
+%define kernel_prereq  fileutils, module-init-tools, initscripts >= 8.11.1-1, grubby >= 7.0.4-1
 %else
-%define kernel_prereq  fileutils, module-init-tools, initscripts >= 8.11.1-1, kernel-firmware >= %{rpmversion}-%{pkg_release}
+%define kernel_prereq  fileutils, module-init-tools, initscripts >= 8.11.1-1, 
 %endif
 #### Planet-Lab ####
 
@@ -1674,11 +1662,13 @@ fi
 /usr/include/*
 %endif
 
+%if 0
 %if %{with_firmware}
 %files firmware
 %defattr(-,root,root)
 /lib/firmware/*
 %doc linux-%{kversion}.%{_target_cpu}/firmware/WHENCE
+%endif
 %endif
 
 %if %{with_bootwrapper}
@@ -1743,6 +1733,7 @@ fi
 /etc/ld.so.conf.d/kernel-%{KVERREL}%{?2:.%{2}}.conf\
 %endif\
 /lib/modules/%{KVERREL}%{?2:.%{2}}/modules.*\
+/lib/firmware/*\
 %if %{with_dracut}\
 %ghost /boot/initramfs-%{KVERREL}%{?2:.%{2}}.img\
 %else\
