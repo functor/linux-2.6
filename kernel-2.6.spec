@@ -10,7 +10,7 @@ URL: %{SCMURL}
 
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 10
+%define taglevel 11
 
 %define sublevel 32
 #### Planet-Lab ####
@@ -1782,6 +1782,9 @@ fi
 %endif
 
 %changelog
+* Wed Feb 02 2011 S.Çağlar Onur <caglar@cs.princeton.edu> - linux-2.6-32-11
+- older modutils do not support --package and --update option
+
 * Tue Jan 25 2011 S.Çağlar Onur <caglar@cs.princeton.edu> - linux-2.6-32-10
 - disable debug and debuginfo packages for all flavors. Also incorporate kernel-firmware package's content into kernel RPM.
 
