@@ -1556,7 +1556,11 @@ fi\
 %if %{with_dracut}\
 /sbin/new-kernel-pkg --package kernel%{?1:-%{1}} --mkinitrd --dracut --depmod --update %{KVERREL}%{?1:.%{1}} $NEWKERNARGS || exit $?\
 %else\
+%if "%{distro}" == "Fedora" && %{distrorelease} >= 12\
 /sbin/new-kernel-pkg --package kernel%{?1:-%{1}} --mkinitrd --depmod --update %{KVERREL}%{?1:.%{1}} $NEWKERNARGS || exit $?\
+%else\
+/sbin/new-kernel-pkg --mkinitrd --depmod --install %{KVERREL}%{?1:.%{1}} || exit $?\
+%endif\
 %endif}\
 %if "%{distro}" == "Fedora" && %{distrorelease} >= 12\
 /sbin/new-kernel-pkg --package kernel%{?1:-%{1}} --rpmposttrans %{KVERREL}%{?1:.%{1}} || exit $?\
