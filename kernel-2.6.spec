@@ -34,7 +34,7 @@ Summary: The Linux kernel
 
 %define rhel 1
 %if %{rhel}
-%define distro_build 71.14.1
+%define distro_build 71.18.1
 #### Planet-Lab ####
 %define signmodules 0
 #### Planet-Lab ####
@@ -51,7 +51,7 @@ Summary: The Linux kernel
 # Don't stare at the awk too long, you'll go blind.
 %define fedora_cvs_origin   1462
 %define fedora_cvs_revision() %2
-%global distro_build %(echo %{fedora_cvs_origin}.%{fedora_cvs_revision $Revision: 1.18.2.14 $} | awk -F . '{ OFS = "."; ORS = ""; print $3 - $1 ; i = 4 ; OFS = ""; while (i <= NF) { print ".", $i ; i++} }')
+%global distro_build %(echo %{fedora_cvs_origin}.%{fedora_cvs_revision $Revision: 1.18.2.18 $} | awk -F . '{ OFS = "."; ORS = ""; print $3 - $1 ; i = 4 ; OFS = ""; while (i <= NF) { print ".", $i ; i++} }')
 %define distro_build %{fedora_build}
 %define signmodules 0
 %endif
@@ -199,7 +199,7 @@ Summary: The Linux kernel
 %endif
 
 # The kernel tarball/base version
-%define kversion 2.6.32-71.14.1.el6
+%define kversion 2.6.32-71.18.1.el6
 
 %define make_target bzImage
 
@@ -603,7 +603,7 @@ BuildConflicts: rhbuildsys(DiskFree) < 7Gb
 %define debuginfo_args --strict-build-id
 %endif
 
-Source0: linux-2.6.32-71.14.1.el6.tar.bz2
+Source0: linux-2.6.32-71.18.1.el6.tar.bz2
 
 Source1: Makefile.common
 
@@ -663,7 +663,7 @@ Source79: config-debug-rhel
 Source80: config-generic-rhel
 Source81: config-powerpc64
 
-Patch1: patch-2.6.32-71.14.1.el6-vs2.3.0.36.29.4.diff
+Patch1: patch-2.6.32-71.18.1.el6-vs2.3.0.36.29.4.diff
 Patch2: linux-2.6-220-delta-ptrace-fix01.patch
 Patch3: linux-2.6-250-ipsets.patch
 Patch4: linux-2.6-510-ipod.patch
@@ -959,7 +959,7 @@ cp %{SOURCE15} %{SOURCE1} %{SOURCE16} %{SOURCE17} %{SOURCE18} .
 make -f %{SOURCE20} VERSION=%{version} configs
 
 #### Planet-Lab ####
-ApplyPatch patch-2.6.32-71.14.1.el6-vs2.3.0.36.29.4.diff
+ApplyPatch patch-2.6.32-71.18.1.el6-vs2.3.0.36.29.4.diff
 ApplyPatch linux-2.6-220-delta-ptrace-fix01.patch
 ApplyPatch linux-2.6-250-ipsets.patch
 ApplyPatch linux-2.6-510-ipod.patch
@@ -1782,11 +1782,73 @@ fi
 %endif
 
 %changelog
+* Wed Feb 2 2011 Frantisek Hrbata <fhrbata@redhat.com> [2.6.32-71.18.1.el6]
+- [netdrv] ixgbe: make sure FCoE DDP user buffers are really released by the HW (Frantisek Hrbata) [674002 617193]
+- [netdrv] ixgbe: invalidate FCoE DDP context when no error status is available (Frantisek Hrbata) [674002 617193]
+- [netdrv] ixgbe: avoid doing FCoE DDP when adapter is DOWN or RESETTING (Frantisek Hrbata) [674002 617193]
+- [fcoe] libfc: remove tgt_flags from fc_fcp_pkt struct (Mike Christie) [666797 633915]
+- [fcoe] libfc: use rport timeout values for fcp recovery (Frantisek Hrbata) [666797 633915]
+- [fcoe] libfc: incorrect scsi host byte codes returned to scsi-ml (Mike Christie) [666797 633915]
+- [scsi] scsi_dh_alua: fix overflow in alua_rtpg port group id check (Mike Snitzer) [673978 670572]
+
 * Wed Feb 02 2011 S.Çağlar Onur <caglar@cs.princeton.edu> - linux-2.6-32-11
 - older modutils do not support --package and --update option
 
+* Fri Jan 28 2011 Frantisek Hrbata <fhrbata@redhat.com> [2.6.32-71.17.1.el6]
+- [s390x] kdump: allow zfcpdump to mount and write to ext4 file systems (Amerigo Wang) [661667 628676]
+- [scsi] qla2xxx: Properly set the return value in function qla2xxx_eh_abort (Chad Dupuis) [664398 635710]
+- [scsi] qla2xxx: Drop srb reference before waiting for completion (Chad Dupuis) [664398 635710]
+- [virt] KVM: VMX: Really clear cr0.ts when giving the guest ownership of the fpu (Avi Kivity) [658891 645898]
+- [virt] KVM: SVM: Initialize fpu_active in init_vmcb() (Avi Kivity) [658891 645898]
+- [virt] KVM: x86: Use unlazy_fpu() for host FPU (Avi Kivity) [658891 645898]
+- [virt] KVM: Set cr0.et when the guest writes cr0 (Avi Kivity) [658891 645898]
+- [virt] KVM: VMX: Give the guest ownership of cr0.ts when the fpu is active (Avi Kivity) [658891 645898]
+- [virt] KVM: Lazify fpu activation and deactivation (Avi Kivity) [658891 645898]
+- [virt] KVM: VMX: Allow the guest to own some cr0 bits (Avi Kivity) [658891 645898]
+- [virt] KVM: Replace read accesses of vcpu->arch.cr0 by an accessor (Avi Kivity) [658891 645898]
+- [virt] KVM: VMX: trace clts and lmsw instructions as cr accesses (Avi Kivity) [658891 645898]
+
 * Tue Jan 25 2011 S.Çağlar Onur <caglar@cs.princeton.edu> - linux-2.6-32-10
 - disable debug and debuginfo packages for all flavors. Also incorporate kernel-firmware package's content into kernel RPM.
+
+* Mon Jan 24 2011 Frantisek Hrbata <fhrbata@redhat.com> [2.6.32-71.16.1.el6]
+- [net] ipsec: fragment locally generated tunnel-mode IPSec6 packets as needed (Herbert Xu) [670421 661113]
+- [net] tcp: Increase TCP_MAXSEG socket option minimum to TCP_MIN_MSS (Frantisek Hrbata) [652510 652511] {CVE-2010-4165}
+- [perf] perf_events: Fix perf_counter_mmap() hook in mprotect() (Oleg Nesterov) [651672 651673] {CVE-2010-4169}
+- [md] dm mpath: revert "dm: Call blk_abort_queue on failed paths" (Mike Snitzer) [658854 636771]
+- [x86] UV: Address interrupt/IO port operation conflict (George Beshers) [662921 659480]
+- [mm] guard page for stacks that grow upwards (Johannes Weiner) [666796 630562]
+- [scsi] enable state transistions from OFFLINE to RUNNING (Mike Christie) [660590 643237]
+- [scsi] set queue limits no_cluster for stacked devices (Mike Snitzer) [662050 658293]
+- [mm] Out-of-memory under memory cgroup can call both of oom-killer-for-memcg and oom-killer-for-page-fault (Larry Woodman) [661732 592879]
+- [scsi] libfc: possible race could panic system due to NULL fsp->cmd (Mike Christie) [662049 638297]
+- [kernel] exec: copy-and-paste the fixes into compat_do_execve() paths (Oleg Nesterov) [627811 625695] {CVE-2010-4243}
+- [kernel] exec: make argv/envp memory visible to oom-killer (Oleg Nesterov) [627811 625695] {CVE-2010-4243}
+- [virt] virtio: console: Send SIGIO in case of port unplug (Amit Shah) [652720 624628]
+- [virt] virtio: console: Send SIGIO on new data arrival on ports (Amit Shah) [652720 624628]
+- [virt] virtio: console: Send SIGIO to processes that request it for host events (Amit Shah) [652720 624628]
+- [virt] virtio: console: Reference counting portdev structs is not needed (Amit Shah) [662721 628805]
+- [virt] virtio: console: Add reference counting for port struct (Amit Shah) [662721 628805]
+- [virt] virtio: console: Use cdev_alloc() instead of cdev_init() (Amit Shah) [662721 628805]
+- [virt] virtio: console: Add a find_port_by_devt() function (Amit Shah) [662721 628805]
+- [virt] virtio: console: Add a list of portdevs that are active (Amit Shah) [662721 628805]
+- [virt] virtio: console: open: Use a common path for error handling (Amit Shah) [662721 628805]
+- [virt] virtio: console: remove_port() should return void (Amit Shah) [662721 628805]
+- [virt] virtio: console: Make write() return -ENODEV on hot-unplug (Amit Shah) [662721 628805]
+- [virt] virtio: console: Make read() return -ENODEV on hot-unplug (Amit Shah) [662721 628805]
+- [virt] virtio: console: Unblock poll on port hot-unplug (Amit Shah) [662721 628805]
+- [virt] virtio: console: Un-block reads on chardev close (Amit Shah) [662721 628805]
+- [virt] virtio: console: Check if portdev is valid in send_control_msg() (Amit Shah) [662721 628805]
+- [virt] virtio: console: Remove control vq data only if using multiport support (Amit Shah) [662721 628805]
+- [virt] virtio: console: Reset vdev before removing device (Amit Shah) [662721 628805]
+- [fs] Fix nfsv4 client lock reclaim behaviour (Sachin Prabhu) [661730 638269]
+- [scsi] scsi_dh_alua: Handle all states correctly (Mike Snitzer) [659610 636994]
+- [kernel] execve: improve interactivity and respond to SIGKILL with large arguments (Dave Anderson) [661731 629178]
+- [virt] xen: handle events as edge-triggered (Andrew Jones) [661737 550724]
+- [virt] xen: use percpu interrupts for IPIs and VIRQs (Andrew Jones) [661737 550724]
+
+* Sun Jan 23 2011 Frantisek Hrbata <fhrbata@redhat.com> [2.6.32-71.15.1.el6]
+- [net] bonding: prevent oopsing on calling pskb_may_pull on shared skb (Andy Gospodarek) [671342 665110]
 
 * Wed Jan 12 2011 S.Çağlar Onur <caglar@cs.princeton.edu> - linux-2.6-32-9
 - bump to kernel-2.6.32-71.14.1.el6, see https://rhn.redhat.com/errata/RHSA-2011-0007.html for details
