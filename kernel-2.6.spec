@@ -10,7 +10,7 @@ URL: %{SCMURL}
 
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 11
+%define taglevel 12
 
 %define sublevel 32
 #### Planet-Lab ####
@@ -1782,6 +1782,9 @@ fi
 %endif
 
 %changelog
+* Wed Feb 23 2011 S.Çağlar Onur <caglar@verivue.com> - linux-2.6-32-12
+- bump to 2.6.32-71.18.1.el6, see https://rhn.redhat.com/errata/RHSA-2011-0283.html
+
 * Wed Feb 2 2011 Frantisek Hrbata <fhrbata@redhat.com> [2.6.32-71.18.1.el6]
 - [netdrv] ixgbe: make sure FCoE DDP user buffers are really released by the HW (Frantisek Hrbata) [674002 617193]
 - [netdrv] ixgbe: invalidate FCoE DDP context when no error status is available (Frantisek Hrbata) [674002 617193]
