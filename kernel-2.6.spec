@@ -13,6 +13,10 @@ URL: %{SCMURL}
 %define taglevel 12
 
 %define sublevel 32
+
+%if ("%{distro}" == "Fedora" && %{distrorelease} >= 12) || ("%{distro}" == "SL" && %{distrorelease} >= 6) || ("%{distro}" == "CentOS" && %{distrorelease} >= 6)
+%define modern_distro 1
+%endif
 #### Planet-Lab ####
 
 Summary: The Linux kernel
@@ -134,7 +138,7 @@ Summary: The Linux kernel
 %define with_vdso_install %{?_without_vdso_install: 0} %{?!_without_vdso_install: 1}
 #### Planet-Lab ####
 # Use dracut instead of mkinitrd for initrd image generation
-%if "%{distro}" == "Fedora" && %{distrorelease} >= 12
+%if %{modern_distro}
 %define with_dracut       %{?_without_dracut:       0} %{?!_without_dracut:       1}
 %else
 %define with_dracut       %{?_without_dracut:       1} %{?!_without_dracut:       0}
@@ -463,7 +467,7 @@ Summary: The Linux kernel
 # integration in the distro harder than needed.
 #
 #### Planet-Lab ####
-%if "%{distro}" == "Fedora" && %{distrorelease} >= 12
+%if %{modern_distro}
 %define package_conflicts initscripts < 7.23, udev < 145-11, iptables < 1.3.2-1, ipw2200-firmware < 2.4, iwl4965-firmware < 228.57.2, selinux-policy-targeted < 1.25.3-14, squashfs-tools < 4.0, wireless-tools < 29-3
 %else
 %define package_conflicts initscripts < 7.23, iptables < 1.3.2-1, ipw2200-firmware < 2.4, iwl4965-firmware < 228.57.2, selinux-policy-targeted < 1.25.3-14, squashfs-tools < 4.0, wireless-tools < 29-3
@@ -492,7 +496,7 @@ Summary: The Linux kernel
 # scripts use them.
 #
 #### Planet-Lab ####
-%if "%{distro}" == "Fedora" && %{distrorelease} >= 12
+%if %{modern_distro}
 %define kernel_prereq  fileutils, module-init-tools, initscripts >= 8.11.1-1, grubby >= 7.0.4-1
 %else
 %define kernel_prereq  fileutils, module-init-tools, initscripts >= 8.11.1-1, 
@@ -503,7 +507,7 @@ Summary: The Linux kernel
 %define initrd_prereq  dracut-kernel >= 002-18.git413bcf78
 %else
 #### Planet-Lab ####
-%if "%{distro}" == "Fedora" && %{distrorelease} >= 12
+%if %{modern_distro}
 %define initrd_prereq  mkinitrd >= 6.0.61-1
 %else
 %define initrd_prereq  mkinitrd >= 5.1
@@ -566,11 +570,7 @@ BuildRequires: module-init-tools, patch >= 2.5.4, bash >= 2.03, sh-utils, tar
 BuildRequires: bzip2, findutils, gzip, m4, perl, make >= 3.78, diffutils, gawk
 BuildRequires: gcc >= 3.4.2, binutils >= 2.12, redhat-rpm-config
 #### Planet-Lab ####
-%if "%{distro}" == "Fedora" && %{distrorelease} >= 14
-BuildRequires: net-tools, patchutils, rpm-build >= 4.8.0-7
-%else
 BuildRequires: net-tools, patchutils, rpm-build
-%endif
 #### Planet-Lab ####
 %if %{with_doc}
 BuildRequires: xmlto
@@ -1556,13 +1556,13 @@ fi\
 %if %{with_dracut}\
 /sbin/new-kernel-pkg --package kernel%{?1:-%{1}} --mkinitrd --dracut --depmod --update %{KVERREL}%{?1:.%{1}} $NEWKERNARGS || exit $?\
 %else\
-%if "%{distro}" == "Fedora" && %{distrorelease} >= 12\
+%if %{modern_distro}\
 /sbin/new-kernel-pkg --package kernel%{?1:-%{1}} --mkinitrd --depmod --update %{KVERREL}%{?1:.%{1}} $NEWKERNARGS || exit $?\
 %else\
 /sbin/new-kernel-pkg --mkinitrd --depmod --install %{KVERREL}%{?1:.%{1}} || exit $?\
 %endif\
 %endif}\
-%if "%{distro}" == "Fedora" && %{distrorelease} >= 12\
+%if %{modern_distro}\
 /sbin/new-kernel-pkg --package kernel%{?1:-%{1}} --rpmposttrans %{KVERREL}%{?1:.%{1}} || exit $?\
 if [ -x /sbin/weak-modules ]\
 then\
