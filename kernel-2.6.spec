@@ -16,6 +16,8 @@ URL: %{SCMURL}
 
 %if ("%{distro}" == "Fedora" && %{distrorelease} >= 12) || ("%{distro}" == "SL" && %{distrorelease} >= 6) || ("%{distro}" == "CentOS" && %{distrorelease} >= 6)
 %define modern_distro 1
+%else
+%define modern_distro 0
 %endif
 #### Planet-Lab ####
 
