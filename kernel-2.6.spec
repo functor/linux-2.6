@@ -40,7 +40,7 @@ Summary: The Linux kernel
 
 %define rhel 1
 %if %{rhel}
-%define distro_build 71.18.1
+%define distro_build 71.18.2
 #### Planet-Lab ####
 %define signmodules 0
 #### Planet-Lab ####
@@ -57,7 +57,7 @@ Summary: The Linux kernel
 # Don't stare at the awk too long, you'll go blind.
 %define fedora_cvs_origin   1462
 %define fedora_cvs_revision() %2
-%global distro_build %(echo %{fedora_cvs_origin}.%{fedora_cvs_revision $Revision: 1.18.2.18 $} | awk -F . '{ OFS = "."; ORS = ""; print $3 - $1 ; i = 4 ; OFS = ""; while (i <= NF) { print ".", $i ; i++} }')
+%global distro_build %(echo %{fedora_cvs_origin}.%{fedora_cvs_revision $Revision: 1.18.2.19 $} | awk -F . '{ OFS = "."; ORS = ""; print $3 - $1 ; i = 4 ; OFS = ""; while (i <= NF) { print ".", $i ; i++} }')
 %define distro_build %{fedora_build}
 %define signmodules 0
 %endif
@@ -205,7 +205,7 @@ Summary: The Linux kernel
 %endif
 
 # The kernel tarball/base version
-%define kversion 2.6.32-71.18.1.el6
+%define kversion 2.6.32-71.18.2.el6
 
 %define make_target bzImage
 
@@ -605,7 +605,7 @@ BuildConflicts: rhbuildsys(DiskFree) < 7Gb
 %define debuginfo_args --strict-build-id
 %endif
 
-Source0: linux-2.6.32-71.18.1.el6.tar.bz2
+Source0: linux-2.6.32-71.18.2.el6.tar.bz2
 
 Source1: Makefile.common
 
@@ -665,7 +665,7 @@ Source79: config-debug-rhel
 Source80: config-generic-rhel
 Source81: config-powerpc64
 
-Patch1: patch-2.6.32-71.18.1.el6-vs2.3.0.36.29.4.diff
+Patch1: patch-2.6.32-71.18.2.el6-vs2.3.0.36.29.4.diff
 Patch2: linux-2.6-220-delta-ptrace-fix01.patch
 Patch3: linux-2.6-250-ipsets.patch
 Patch4: linux-2.6-510-ipod.patch
@@ -961,7 +961,7 @@ cp %{SOURCE15} %{SOURCE1} %{SOURCE16} %{SOURCE17} %{SOURCE18} .
 make -f %{SOURCE20} VERSION=%{version} configs
 
 #### Planet-Lab ####
-ApplyPatch patch-2.6.32-71.18.1.el6-vs2.3.0.36.29.4.diff
+ApplyPatch patch-2.6.32-71.18.2.el6-vs2.3.0.36.29.4.diff
 ApplyPatch linux-2.6-220-delta-ptrace-fix01.patch
 ApplyPatch linux-2.6-250-ipsets.patch
 ApplyPatch linux-2.6-510-ipod.patch
@@ -1784,6 +1784,9 @@ fi
 %endif
 
 %changelog
+* Wed Mar 2 2011 Frantisek Hrbata <fhrbata@redhat.com> [2.6.32-71.18.2.el6]
+- [fs] sunrpc: Correct a misapplied patch (J. Bruce Fields) [678094 678146]
+
 * Wed Feb 23 2011 S.Çağlar Onur <caglar@verivue.com> - linux-2.6-32-12
 - bump to 2.6.32-71.18.1.el6, see https://rhn.redhat.com/errata/RHSA-2011-0283.html
 
