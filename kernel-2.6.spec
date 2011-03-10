@@ -10,7 +10,7 @@ URL: %{SCMURL}
 
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 12
+%define taglevel 13
 
 %define sublevel 32
 
@@ -1784,6 +1784,9 @@ fi
 %endif
 
 %changelog
+* Thu Mar 10 2011 S.Çağlar Onur <caglar@verivue.com> - linux-2.6-32-13
+- bump to 2.6.32-71.18.2.el6, see https://rhn.redhat.com/errata/RHSA-2011-0329.html
+
 * Wed Mar 2 2011 Frantisek Hrbata <fhrbata@redhat.com> [2.6.32-71.18.2.el6]
 - [fs] sunrpc: Correct a misapplied patch (J. Bruce Fields) [678094 678146]
 
