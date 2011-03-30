@@ -665,8 +665,7 @@ Source79: config-debug-rhel
 Source80: config-generic-rhel
 Source81: config-powerpc64
 
-Patch1: patch-2.6.32-71.18.2.el6-vs2.3.0.36.29.4.diff
-Patch2: linux-2.6-220-delta-ptrace-fix01.patch
+Patch1: patch-2.6.32-71.18.2.el6-vs2.3.0.36.29.6.diff
 Patch3: linux-2.6-250-ipsets.patch
 Patch4: linux-2.6-510-ipod.patch
 Patch5: linux-2.6-521-packet-tagging.patch
@@ -961,8 +960,7 @@ cp %{SOURCE15} %{SOURCE1} %{SOURCE16} %{SOURCE17} %{SOURCE18} .
 make -f %{SOURCE20} VERSION=%{version} configs
 
 #### Planet-Lab ####
-ApplyPatch patch-2.6.32-71.18.2.el6-vs2.3.0.36.29.4.diff
-ApplyPatch linux-2.6-220-delta-ptrace-fix01.patch
+ApplyPatch patch-2.6.32-71.18.2.el6-vs2.3.0.36.29.6.diff
 ApplyPatch linux-2.6-250-ipsets.patch
 ApplyPatch linux-2.6-510-ipod.patch
 ApplyPatch linux-2.6-521-packet-tagging.patch

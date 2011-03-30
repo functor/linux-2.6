@@ -63,7 +63,7 @@ index 9e8942b..1c0b4a5 100644
 +++ b/net/ipv4/af_inet.c
 @@ -332,6 +332,9 @@ lookup_protocol:
  	if ((protocol == IPPROTO_ICMP) &&
- 		nx_capable(CAP_NET_RAW, NXC_RAW_ICMP))
+ 	        nx_capable(CAP_NET_RAW, NXC_RAW_ICMP))
  		goto override;
 +	if (sock->type == SOCK_RAW &&
 +		nx_capable(CAP_NET_RAW, NXC_RAW_SOCKET))
