@@ -10,7 +10,7 @@ URL: %{SCMURL}
 
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 14
+%define taglevel 15
 
 %define sublevel 32
 
@@ -1782,6 +1782,9 @@ fi
 %endif
 
 %changelog
+* Wed Mar 30 2011 S.Çağlar Onur <caglar@verivue.com> - linux-2.6-32-15
+- refresh vs patch against latest upstream release (aka. vs2.3.0.36.29.4 --> vs2.3.0.36.29.6)
+
 * Wed Mar 16 2011 S.Çağlar Onur <caglar@verivue.com> - linux-2.6-32-14
 - Do not enable CONFIG_SYSFS_DEPRECATED* options for Scientific Linux
 
