@@ -10,7 +10,7 @@ URL: %{SCMURL}
 
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 15
+%define taglevel 16
 
 %define sublevel 32
 
@@ -1784,6 +1784,9 @@ fi
 %endif
 
 %changelog
+* Sat Apr 09 2011 S.Çağlar Onur <caglar@verivue.com> - linux-2.6-32-16
+- bump to 2.6.32-71.24.1.el6, see https://rhn.redhat.com/errata/RHSA-2011-0421.html
+
 * Wed Mar 30 2011 S.Çağlar Onur <caglar@verivue.com> - linux-2.6-32-15
 - refresh vs patch against latest upstream release (aka. vs2.3.0.36.29.4 --> vs2.3.0.36.29.6)
 
