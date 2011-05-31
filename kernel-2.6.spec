@@ -10,7 +10,7 @@ URL: %{SCMURL}
 
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 17
+%define taglevel 18
 
 %define sublevel 32
 
@@ -1786,6 +1786,11 @@ fi
 %endif
 
 %changelog
+* Tue May 31 2011 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-32-18
+- There appears to be a duplicate 2.6-32-17 tag (0704a877f225262701c4076d16e933d8f92f854c) that is indelible because
+- presumably the sync script keeps pushing it back from the other server when it is deleted. Creating this new tag to
+- bypass that problem.
+
 * Tue May 31 2011 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-32-17
 - Fix for COW issue on 2.6.32+ kernels, provided by Daniel Hozac.
 
