@@ -10,7 +10,7 @@ URL: %{SCMURL}
 
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 17
+%define taglevel 16
 
 %define sublevel 32
 
@@ -1786,9 +1786,6 @@ fi
 %endif
 
 %changelog
-* Tue May 31 2011 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-32-17
-- This commit fixes the COW issue through a patch provided by Daniel Hozac.
-
 * Sat Apr 09 2011 S.Çağlar Onur <caglar@verivue.com> - linux-2.6-32-16
 - bump to 2.6.32-71.24.1.el6, see https://rhn.redhat.com/errata/RHSA-2011-0421.html
 
