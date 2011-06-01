@@ -34,10 +34,10 @@ mm/slab.c:3646: warning: assignment makes integer from pointer without a cast
  create mode 100644 include/linux/arrays.h
 
 diff --git a/arch/Kconfig b/arch/Kconfig
-index b15fd1c..16a5734 100644
+index cdea504..608c64d 100644
 --- a/arch/Kconfig
 +++ b/arch/Kconfig
-@@ -41,6 +41,14 @@ config OPROFILE_EVENT_MULTIPLEX
+@@ -27,6 +27,14 @@ config OPROFILE_EVENT_MULTIPLEX
  
  	  If unsure, say N.
  
@@ -103,10 +103,10 @@ index dfdbf64..29c79b8 100644
  	OFFSET(TI_exec_domain, thread_info, exec_domain);
  	OFFSET(TI_flags, thread_info, flags);
 diff --git a/arch/x86/kernel/entry_32.S b/arch/x86/kernel/entry_32.S
-index 21feb03..1109aac 100644
+index 8b8db35..fc82d32 100644
 --- a/arch/x86/kernel/entry_32.S
 +++ b/arch/x86/kernel/entry_32.S
-@@ -526,6 +526,34 @@ ENTRY(system_call)
+@@ -538,6 +538,34 @@ ENTRY(system_call)
  	cmpl $(nr_syscalls), %eax
  	jae syscall_badsys
  syscall_call:
@@ -142,10 +142,10 @@ index 21feb03..1109aac 100644
  	movl %eax,PT_EAX(%esp)		# store the return value
  syscall_exit:
 diff --git a/arch/x86/mm/fault.c b/arch/x86/mm/fault.c
-index a948561..76d32a6 100644
+index b899fb7..c827e81 100644
 --- a/arch/x86/mm/fault.c
 +++ b/arch/x86/mm/fault.c
-@@ -62,6 +62,16 @@ static inline int notify_page_fault(struct pt_regs *regs)
+@@ -65,6 +65,16 @@ static inline int notify_page_fault(struct pt_regs *regs)
  	return ret;
  }
  
@@ -163,7 +163,7 @@ index a948561..76d32a6 100644
   * Prefetch quirks:
   *
 diff --git a/block/blk-core.c b/block/blk-core.c
-index 5e1b914..2260822 100644
+index 48dbd8d..94030b1 100644
 --- a/block/blk-core.c
 +++ b/block/blk-core.c
 @@ -27,12 +27,23 @@
@@ -190,7 +190,7 @@ index 5e1b914..2260822 100644
  EXPORT_TRACEPOINT_SYMBOL_GPL(block_remap);
  EXPORT_TRACEPOINT_SYMBOL_GPL(block_rq_remap);
  EXPORT_TRACEPOINT_SYMBOL_GPL(block_bio_complete);
-@@ -1535,6 +1546,24 @@ static inline void __generic_make_request(struct bio *bio)
+@@ -1568,6 +1579,24 @@ static inline void __generic_make_request(struct bio *bio)
  
  		trace_block_bio_queue(q, bio);
  
@@ -216,7 +216,7 @@ index 5e1b914..2260822 100644
  	} while (ret);
  
 diff --git a/drivers/oprofile/cpu_buffer.c b/drivers/oprofile/cpu_buffer.c
-index de82183..1f1acf6 100644
+index 9e0ef46..f6217fd 100644
 --- a/drivers/oprofile/cpu_buffer.c
 +++ b/drivers/oprofile/cpu_buffer.c
 @@ -22,6 +22,7 @@
@@ -227,7 +227,7 @@ index de82183..1f1acf6 100644
  
  #include "event_buffer.h"
  #include "cpu_buffer.h"
-@@ -288,6 +289,17 @@ static inline void oprofile_end_trace(struct oprofile_cpu_buffer *cpu_buf)
+@@ -286,6 +287,17 @@ static inline void oprofile_end_trace(struct oprofile_cpu_buffer *cpu_buf)
  	cpu_buf->tracing = 0;
  }
  
@@ -245,9 +245,9 @@ index de82183..1f1acf6 100644
  static inline void
  __oprofile_add_ext_sample(unsigned long pc, struct pt_regs * const regs,
  			  unsigned long event, int is_kernel)
-@@ -322,7 +334,25 @@ void oprofile_add_sample(struct pt_regs * const regs, unsigned long event)
- 	int is_kernel = !user_mode(regs);
- 	unsigned long pc = profile_pc(regs);
+@@ -328,7 +340,25 @@ void oprofile_add_sample(struct pt_regs * const regs, unsigned long event)
+ 		pc = ESCAPE_CODE; /* as this causes an early return. */
+ 	}
  
 +#ifdef CONFIG_CHOPSTIX
 +	if (rec_event) {
@@ -272,7 +272,7 @@ index de82183..1f1acf6 100644
  
  /*
 diff --git a/fs/bio.c b/fs/bio.c
-index e10d5b1..db37c70 100644
+index 06f71fc..56fc42d 100644
 --- a/fs/bio.c
 +++ b/fs/bio.c
 @@ -26,6 +26,7 @@
@@ -291,7 +291,7 @@ index e10d5b1..db37c70 100644
  /*
   * fs_bio_set is the bio_set containing bio and iovec memory pools used by
   * IO code that does not need private memory pools.
-@@ -1395,6 +1397,17 @@ void bio_check_pages_dirty(struct bio *bio)
+@@ -1408,6 +1410,17 @@ void bio_check_pages_dirty(struct bio *bio)
  	}
  }
  
@@ -309,7 +309,7 @@ index e10d5b1..db37c70 100644
  /**
   * bio_endio - end I/O on a bio
   * @bio:	bio
-@@ -1416,6 +1429,24 @@ void bio_endio(struct bio *bio, int error)
+@@ -1429,6 +1442,24 @@ void bio_endio(struct bio *bio, int error)
  	else if (!test_bit(BIO_UPTODATE, &bio->bi_flags))
  		error = -EIO;
  
@@ -335,7 +335,7 @@ index e10d5b1..db37c70 100644
  		bio->bi_end_io(bio, error);
  }
 diff --git a/fs/exec.c b/fs/exec.c
-index f42d519..5ac9745 100644
+index 7fdbf49..6f2d772 100644
 --- a/fs/exec.c
 +++ b/fs/exec.c
 @@ -27,6 +27,7 @@
@@ -346,7 +346,7 @@ index f42d519..5ac9745 100644
  #include <linux/fcntl.h>
  #include <linux/smp_lock.h>
  #include <linux/swap.h>
-@@ -693,6 +694,13 @@ struct file *open_exec(const char *name)
+@@ -735,6 +736,13 @@ struct file *open_exec(const char *name)
  	if (err)
  		goto exit;
  
@@ -419,10 +419,10 @@ index 878cab4..6c21914 100644
  #endif
  #ifdef CONFIG_DEBUG_MUTEXES
 diff --git a/include/linux/sched.h b/include/linux/sched.h
-index caf30e1..6d60b0f 100644
+index b0cb58b..45f69c3 100644
 --- a/include/linux/sched.h
 +++ b/include/linux/sched.h
-@@ -1351,6 +1351,11 @@ struct task_struct {
+@@ -1398,6 +1398,11 @@ struct task_struct {
  	cputime_t utime, stime, utimescaled, stimescaled;
  	cputime_t gtime;
  	cputime_t prev_utime, prev_stime;
@@ -529,7 +529,7 @@ index e04aa45..196ac04 100644
  	}
  
 diff --git a/kernel/sched.c b/kernel/sched.c
-index dd8a4df..345645b 100644
+index 1e90fc0..aa4d3d7 100644
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
 @@ -10,7 +10,7 @@
@@ -541,7 +541,7 @@ index dd8a4df..345645b 100644
   *		an array-switch method of distributing timeslices
   *		and per-CPU runqueues.  Cleanups and useful suggestions
   *		by Davide Libenzi, preemptible kernel bits by Robert Love.
-@@ -73,12 +73,16 @@
+@@ -73,6 +73,7 @@
  #include <linux/ftrace.h>
  #include <linux/vs_sched.h>
  #include <linux/vs_cvirt.h>
@@ -549,8 +549,9 @@ index dd8a4df..345645b 100644
  
  #include <asm/tlb.h>
  #include <asm/irq_regs.h>
- 
+@@ -80,6 +81,9 @@
  #include "sched_cpupri.h"
+ #include "sched_autogroup.h"
  
 +#define INTERRUPTIBLE   -1
 +#define RUNNING         0
@@ -558,18 +559,18 @@ index dd8a4df..345645b 100644
  #define CREATE_TRACE_POINTS
  #include <trace/events/sched.h>
  
-@@ -2719,6 +2723,10 @@ static void __sched_fork(struct task_struct *p)
- 	INIT_HLIST_HEAD(&p->preempt_notifiers);
- #endif
+@@ -2670,6 +2674,10 @@ static int try_to_wake_up(struct task_struct *p, unsigned int state,
+ 	rq = cpu_rq(cpu);
+ 	spin_lock(&rq->lock);
  
 +#ifdef CONFIG_CHOPSTIX
 +    p->last_ran_j = jiffies;
 +    p->last_interrupted = INTERRUPTIBLE;
 +#endif
  	/*
- 	 * We mark the process as running here, but have not actually
- 	 * inserted it onto the runqueue yet. This guarantees that
-@@ -5764,6 +5772,30 @@ pick_next_task(struct rq *rq)
+ 	 * We migrated the task without holding either rq->lock, however
+ 	 * since the task is not on the task list itself, nobody else
+@@ -5988,6 +5996,30 @@ pick_next_task(struct rq *rq)
  	}
  }
  
@@ -600,7 +601,7 @@ index dd8a4df..345645b 100644
  /*
   * schedule() is the main scheduler function.
   */
-@@ -5811,6 +5843,54 @@ need_resched_nonpreemptible:
+@@ -6034,6 +6066,54 @@ need_resched_nonpreemptible:
  	next = pick_next_task(rq);
  
  	if (likely(prev != next)) {
@@ -656,7 +657,7 @@ index dd8a4df..345645b 100644
  		perf_event_task_sched_out(prev, next);
  
 diff --git a/mm/memory.c b/mm/memory.c
-index 30858a5..b9a9d9f 100644
+index dbd2c19..7f3667d 100644
 --- a/mm/memory.c
 +++ b/mm/memory.c
 @@ -57,6 +57,7 @@
@@ -667,7 +668,7 @@ index 30858a5..b9a9d9f 100644
  
  #include <asm/io.h>
  #include <asm/pgalloc.h>
-@@ -3152,6 +3153,16 @@ out:
+@@ -3168,6 +3169,16 @@ out:
  	return ret;
  }
  
@@ -684,7 +685,7 @@ index 30858a5..b9a9d9f 100644
  /*
   * By the time we get here, we already hold the mm semaphore
   */
-@@ -3197,6 +3208,24 @@ int handle_mm_fault(struct mm_struct *mm, struct vm_area_struct *vma,
+@@ -3213,6 +3224,24 @@ int handle_mm_fault(struct mm_struct *mm, struct vm_area_struct *vma,
  	if (!pte)
  		return VM_FAULT_OOM;
  
@@ -710,7 +711,7 @@ index 30858a5..b9a9d9f 100644
  }
  
 diff --git a/mm/slab.c b/mm/slab.c
-index f644e70..6a5489c 100644
+index c3ceb66..ad2f1a9 100644
 --- a/mm/slab.c
 +++ b/mm/slab.c
 @@ -113,6 +113,7 @@
@@ -738,7 +739,7 @@ index f644e70..6a5489c 100644
  /*
   * struct array_cache
   *
-@@ -3491,6 +3502,19 @@ __cache_alloc(struct kmem_cache *cachep, gfp_t flags, void *caller)
+@@ -3497,6 +3508,19 @@ __cache_alloc(struct kmem_cache *cachep, gfp_t flags, void *caller)
  	kmemleak_alloc_recursive(objp, obj_size(cachep), 1, cachep->flags,
  				 flags);
  	prefetchw(objp);
@@ -758,7 +759,7 @@ index f644e70..6a5489c 100644
  
  	if (likely(objp))
  		kmemcheck_slab_alloc(cachep, flags, objp, obj_size(cachep));
-@@ -3603,13 +3627,28 @@ free_done:
+@@ -3609,13 +3633,28 @@ free_done:
   * Release an obj back to its cache. If the obj has a constructed state, it must
   * be in this state _before_ it is released.  Called with disabled ints.
   */
@@ -789,7 +790,7 @@ index f644e70..6a5489c 100644
  	vx_slab_free(cachep);
  
  	kmemcheck_slab_free(cachep, objp, obj_size(cachep));
-@@ -3811,10 +3850,17 @@ void *__kmalloc_track_caller(size_t size, gfp_t flags, unsigned long caller)
+@@ -3817,10 +3856,17 @@ void *__kmalloc_track_caller(size_t size, gfp_t flags, unsigned long caller)
  EXPORT_SYMBOL(__kmalloc_track_caller);
  
  #else
@@ -807,7 +808,7 @@ index f644e70..6a5489c 100644
  EXPORT_SYMBOL(__kmalloc);
  #endif
  
-@@ -3834,7 +3880,7 @@ void kmem_cache_free(struct kmem_cache *cachep, void *objp)
+@@ -3840,7 +3886,7 @@ void kmem_cache_free(struct kmem_cache *cachep, void *objp)
  	debug_check_no_locks_freed(objp, obj_size(cachep));
  	if (!(cachep->flags & SLAB_DEBUG_OBJECTS))
  		debug_check_no_obj_freed(objp, obj_size(cachep));
@@ -816,7 +817,7 @@ index f644e70..6a5489c 100644
  	local_irq_restore(flags);
  
  	trace_kmem_cache_free(_RET_IP_, objp);
-@@ -3864,7 +3910,7 @@ void kfree(const void *objp)
+@@ -3870,7 +3916,7 @@ void kfree(const void *objp)
  	c = virt_to_cache(objp);
  	debug_check_no_locks_freed(objp, obj_size(c));
  	debug_check_no_obj_freed(objp, obj_size(c));
@@ -825,6 +826,3 @@ index f644e70..6a5489c 100644
  	local_irq_restore(flags);
  }
  EXPORT_SYMBOL(kfree);
--- 
-1.5.4.3
-

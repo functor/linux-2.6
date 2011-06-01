@@ -12,7 +12,7 @@ Subject: [PATCH] linux-2.6-521-packet-tagging.patch
  5 files changed, 10 insertions(+), 0 deletions(-)
 
 diff --git a/include/linux/skbuff.h b/include/linux/skbuff.h
-index 8f462cd..78eb029 100644
+index 69af253..0670992 100644
 --- a/include/linux/skbuff.h
 +++ b/include/linux/skbuff.h
 @@ -391,6 +391,8 @@ struct sk_buff {
@@ -22,10 +22,10 @@ index 8f462cd..78eb029 100644
 +#define skb_tag			mark
 +
  	__u16			vlan_tci;
- 
- 	sk_buff_data_t		transport_header;
+ #ifndef __GENKSYMS__
+ 	__u16			rxhash;
 diff --git a/net/core/skbuff.c b/net/core/skbuff.c
-index 8327d2e..26c3cde 100644
+index 841664f..371324c 100644
 --- a/net/core/skbuff.c
 +++ b/net/core/skbuff.c
 @@ -208,6 +208,7 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t gfp_mask,
@@ -36,7 +36,7 @@ index 8327d2e..26c3cde 100644
  	/* make sure we initialize shinfo sequentially */
  	shinfo = skb_shinfo(skb);
  	atomic_set(&shinfo->dataref, 1);
-@@ -560,6 +561,7 @@ static void __copy_skb_header(struct sk_buff *new, const struct sk_buff *old)
+@@ -562,6 +563,7 @@ static void __copy_skb_header(struct sk_buff *new, const struct sk_buff *old)
  #endif
  #endif
  	new->vlan_tci		= old->vlan_tci;
@@ -45,10 +45,10 @@ index 8327d2e..26c3cde 100644
  	skb_copy_secmark(new, old);
  }
 diff --git a/net/core/sock.c b/net/core/sock.c
-index d84879f..53cb689 100644
+index f406c4b..40197d6 100644
 --- a/net/core/sock.c
 +++ b/net/core/sock.c
-@@ -1073,6 +1073,8 @@ struct sock *sk_alloc(struct net *net, int family, gfp_t priority,
+@@ -1081,6 +1081,8 @@ struct sock *sk_alloc(struct net *net, int family, gfp_t priority,
  		sk->sk_prot = sk->sk_prot_creator = prot;
  		sock_lock_init(sk);
  		sock_net_set(sk, get_net(net));
@@ -58,7 +58,7 @@ index d84879f..53cb689 100644
  
  		sock_update_classid(sk);
 diff --git a/net/ipv4/af_inet.c b/net/ipv4/af_inet.c
-index 4408728..9e8942b 100644
+index e3213b2..3f29c1f 100644
 --- a/net/ipv4/af_inet.c
 +++ b/net/ipv4/af_inet.c
 @@ -181,6 +181,8 @@ static int inet_autobind(struct sock *sk)
@@ -83,6 +83,3 @@ index acc44c6..ac29a8c 100644
  	ih = skb_header_pointer(skb, iphoff, sizeof(_iph), &_iph);
  	if (ih == NULL) {
  		printk("TRUNCATED");
--- 
-1.5.4.3
-

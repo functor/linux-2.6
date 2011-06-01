@@ -49,10 +49,10 @@ index 5cf7270..95a5fde 100644
  	struct nf_ct_ext *ext;
  #ifdef CONFIG_NET_NS
 diff --git a/net/netfilter/Kconfig b/net/netfilter/Kconfig
-index 62cf66b..cb15f4a 100644
+index 7bee9d4..ad362a5 100644
 --- a/net/netfilter/Kconfig
 +++ b/net/netfilter/Kconfig
-@@ -537,6 +537,13 @@ config NETFILTER_XT_MATCH_CLUSTER
+@@ -567,6 +567,13 @@ config NETFILTER_XT_MATCH_CLUSTER
  	  If you say Y or M here, try `iptables -m cluster --help` for
  	  more information.
  
@@ -67,13 +67,13 @@ index 62cf66b..cb15f4a 100644
  	tristate  '"comment" match support'
  	depends on NETFILTER_ADVANCED
 diff --git a/net/netfilter/Makefile b/net/netfilter/Makefile
-index b9815a9..25e24c1 100644
+index da71137..adfbdea 100644
 --- a/net/netfilter/Makefile
 +++ b/net/netfilter/Makefile
-@@ -41,6 +41,7 @@ obj-$(CONFIG_NETFILTER_TPROXY) += nf_tproxy_core.o
- obj-$(CONFIG_NETFILTER_XTABLES) += x_tables.o xt_tcpudp.o
+@@ -44,6 +44,7 @@ obj-$(CONFIG_NETFILTER_XTABLES) += x_tables.o xt_tcpudp.o
  
  # targets
+ obj-$(CONFIG_NETFILTER_XT_TARGET_AUDIT) += xt_AUDIT.o
 +obj-$(CONFIG_NETFILTER_XT_TARGET_SETXID) += xt_SETXID.o
  obj-$(CONFIG_NETFILTER_XT_TARGET_CHECKSUM) += xt_CHECKSUM.o
  obj-$(CONFIG_NETFILTER_XT_TARGET_CLASSIFY) += xt_CLASSIFY.o
@@ -389,7 +389,7 @@ index 225f8d1..6cb5101 100644
  static int __init mark_tg_init(void)
 diff --git a/net/netfilter/xt_SETXID.c b/net/netfilter/xt_SETXID.c
 new file mode 100644
-index 0000000..f8553c5
+index 0000000..4f25a19
 --- /dev/null
 +++ b/net/netfilter/xt_SETXID.c
 @@ -0,0 +1,77 @@
@@ -470,6 +470,3 @@ index 0000000..f8553c5
 +
 +module_init(init);
 +module_exit(fini);
--- 
-1.5.4.3
-
