@@ -661,7 +661,7 @@ Source81: config-i686-debug-rhel
 Source82: config-generic
 Source83: config-x86_64-debug-rhel
 
-Patch1: patch-2.6.32-131.0.15.el6-vs2.3.0.36.29.6.patch
+Patch1: patch-2.6.32-131.0.15.el6-vs2.3.0.36.29.6.diff
 Patch2: linux-2.6-255-vserver-delta-cow-fix23.patch
 Patch3: linux-2.6-250-ipsets.patch
 Patch4: linux-2.6-510-ipod.patch
@@ -974,7 +974,7 @@ cp %{SOURCE15} %{SOURCE1} %{SOURCE16} %{SOURCE17} %{SOURCE18} .
 make -f %{SOURCE20} VERSION=%{version} configs
 
 #### Planet-Lab ####
-ApplyPatch patch-2.6.32-131.0.15.el6-vs2.3.0.36.29.6.patch
+ApplyPatch patch-2.6.32-131.0.15.el6-vs2.3.0.36.29.6.diff
 ApplyPatch linux-2.6-255-vserver-delta-cow-fix23.patch
 ApplyPatch linux-2.6-250-ipsets.patch
 ApplyPatch linux-2.6-510-ipod.patch
@@ -1778,9 +1778,6 @@ fi
 %changelog
 * Wed Jun 01 2011 S.Çağlar Onur <caglar@verivue.com> - linux-2.6-32-19
 - bump to 2.6.32-131.0.15.el6, see https://rhn.redhat.com/errata/RHSA-2011-0498.html and https://rhn.redhat.com/errata/RHSA-2011-0542.html
-
-* Mon May 23 2011 S.Çağlar Onur <caglar@verivue.com> - linux-2.6-32-19
-- Fix Ext4 issues
 
 * Fri May 20 2011 S.Çağlar Onur <caglar@verivue.com> - linux-2.6-32-18
 - fix read-only ext4 problem when /vserver uses barrier
