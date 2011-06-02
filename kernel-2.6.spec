@@ -10,7 +10,7 @@ URL: %{SCMURL}
 
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 19
+%define taglevel 20
 
 %define sublevel 32
 
@@ -1776,6 +1776,9 @@ fi
 %endif
 
 %changelog
+* Thu Jun 02 2011 S.Çağlar Onur <caglar@verivue.com> - linux-2.6-32-20
+- fix spec file
+
 * Wed Jun 01 2011 S.Çağlar Onur <caglar@verivue.com> - linux-2.6-32-19
 - bump to 2.6.32-131.0.15.el6, see https://rhn.redhat.com/errata/RHSA-2011-0498.html and https://rhn.redhat.com/errata/RHSA-2011-0542.html
 
