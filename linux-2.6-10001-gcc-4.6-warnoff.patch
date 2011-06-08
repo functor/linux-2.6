@@ -1,0 +1,12 @@
+--- a/Makefile	2011-06-08 20:54:07.000000000 +0200
++++ b/Makefile	2011-06-08 20:53:19.000000000 +0200
+@@ -605,6 +605,9 @@
+ # conserve stack if available
+ KBUILD_CFLAGS   += $(call cc-option,-fconserve-stack)
+ 
++# turn off the noise with gcc-4.6
++KBUILD_CFLAGS += $(call cc-option, -Wno-unused-but-set-variable)
++
+ # Add user supplied CPPFLAGS, AFLAGS and CFLAGS as the last assignments
+ # But warn user when we do so
+ warn-assign = \
