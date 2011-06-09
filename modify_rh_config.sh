@@ -12,4 +12,6 @@ if ! grep -q Scientific /etc/redhat-release; then
 	sed -i -e "s,# CONFIG_SYSFS_DEPRECATED_V2 is not set,CONFIG_SYSFS_DEPRECATED_V2=y,g" config-generic
 fi
 
+sed -i -e "s,CONFIG_BUILD_DOCSRC=y,CONFIG_BUILD_DOCSRC=n,g" config-generic
+
 popd > /dev/null
