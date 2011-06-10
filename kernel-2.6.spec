@@ -684,6 +684,7 @@ Patch20: linux-2.6-680-htb-hysteresis-tso.patch
 
 Patch10000: linux-2.6-10000-gcc-4.5.patch
 Patch10001: linux-2.6-10001-gcc-4.6-warnoff.patch
+Patch10002: linux-2.6-10002-gcc-4.6-sense_buffer.patch
 Patch11000: linux-2.6-11000-gcc-4.6.patch
 # empty final patch file to facilitate testing of kernel patches
 Patch999999: linux-kernel-test.patch
@@ -999,6 +1000,7 @@ ApplyPatch linux-2.6-660-nmi-watchdog-default.patch
 ApplyPatch linux-2.6-680-htb-hysteresis-tso.patch
 ApplyPatch linux-2.6-10000-gcc-4.5.patch
 ApplyPatch linux-2.6-10001-gcc-4.6-warnoff.patch
+ApplyPatch linux-2.6-10002-gcc-4.6-sense_buffer.patch
 ApplyPatch linux-2.6-11000-gcc-4.6.patch
 #### Planet-Lab ####
 
