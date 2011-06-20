@@ -1739,7 +1739,9 @@ fi
 /etc/ld.so.conf.d/kernel-%{KVERREL}%{?2:.%{2}}.conf\
 %endif\
 /lib/modules/%{KVERREL}%{?2:.%{2}}/modules.*\
+%if %{with_firmware}\
 /lib/firmware/*\
+%endif\
 %if %{with_dracut}\
 %ghost /boot/initramfs-%{KVERREL}%{?2:.%{2}}.img\
 %else\
