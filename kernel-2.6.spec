@@ -10,7 +10,7 @@ URL: %{SCMURL}
 
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 21
+%define taglevel 22
 
 %define sublevel 32
 
@@ -1786,6 +1786,9 @@ fi
 %endif
 
 %changelog
+* Thu Jul 07 2011 Thierry Parmentelat <thierry.parmentelat@sophia.inria.fr> - linux-2.6-32-22
+- fixed specfile for --without firmware
+
 * Fri Jun 10 2011 Thierry Parmentelat <thierry.parmentelat@sophia.inria.fr> - linux-2.6-32-21
 - build tweaks for gcc-4.6 on f15
 
