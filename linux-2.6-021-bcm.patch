@@ -1,7 +1,25 @@
-diff -Nurb linux-i686-2.6.22/drivers/net/bnx2.c linux-i686-2.6.22/drivers/net/bnx2.c
---- linux-i686-2.6.22/drivers/net/bnx2.c	2007-07-08 19:32:17.000000000 -0400
-+++ linux-i686-2.6.22/drivers/net/bnx2.c	2011-07-12 14:55:46.000000000 -0400
-@@ -121,6 +121,10 @@
+diff -Nurb prebcm/kernel-2.6.22/linux-i686-2.6.22/drivers/net/bnx2.c bcm/kernel-2.6.22/linux-i686-2.6.22/drivers/net/bnx2.c
+--- prebcm/kernel-2.6.22/linux-i686-2.6.22/drivers/net/bnx2.c	2007-07-08 19:32:17.000000000 -0400
++++ bcm/kernel-2.6.22/linux-i686-2.6.22/drivers/net/bnx2.c	2011-07-12 16:53:17.000000000 -0400
+@@ -85,6 +85,8 @@
+ 	BCM5708S,
+ 	BCM5709,
+ 	BCM5709S,
++	BCM5716,
++	BCM5716S,
+ } board_t;
+ 
+ /* indexed by board_t, above */
+@@ -100,6 +102,8 @@
+ 	{ "Broadcom NetXtreme II BCM5708 1000Base-SX" },
+ 	{ "Broadcom NetXtreme II BCM5709 1000Base-T" },
+ 	{ "Broadcom NetXtreme II BCM5709 1000Base-SX" },
++	{ "Broadcom NetXtreme II BCM5716 1000Base-T" },
++	{ "Broadcom NetXtreme II BCM5716 1000Base-SX" },
+ 	};
+ 
+ static struct pci_device_id bnx2_pci_tbl[] = {
+@@ -121,6 +125,10 @@
  	  PCI_ANY_ID, PCI_ANY_ID, 0, 0, BCM5709 },
  	{ PCI_VENDOR_ID_BROADCOM, PCI_DEVICE_ID_NX2_5709S,
  	  PCI_ANY_ID, PCI_ANY_ID, 0, 0, BCM5709S },
