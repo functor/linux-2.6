@@ -1,6 +1,6 @@
-diff -Nurb prebcm/kernel-2.6.22/linux-i686-2.6.22/drivers/net/bnx2.c bcm/kernel-2.6.22/linux-i686-2.6.22/drivers/net/bnx2.c
---- prebcm/kernel-2.6.22/linux-i686-2.6.22/drivers/net/bnx2.c	2007-07-08 19:32:17.000000000 -0400
-+++ bcm/kernel-2.6.22/linux-i686-2.6.22/drivers/net/bnx2.c	2011-07-12 16:53:17.000000000 -0400
+diff -Nurb linux-i686-2.6.22/drivers/net/bnx2.c linux-i686-2.6.22/drivers/net/bnx2.c
+--- linux-i686-2.6.22/drivers/net/bnx2.c	2007-07-08 19:32:17.000000000 -0400
++++ linux-i686-2.6.22/drivers/net/bnx2.c	2011-07-12 16:53:17.000000000 -0400
 @@ -85,6 +85,8 @@
  	BCM5708S,
  	BCM5709,
