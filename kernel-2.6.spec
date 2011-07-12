@@ -29,7 +29,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # for module-tag.py - sublevel is used for the version (middle) part of tag names
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 50
+%define taglevel 33
 
 #
 # Polite request for people who spin their own kernel rpms:
@@ -160,6 +160,7 @@ Patch010: linux-2.6-010-e1000e.patch
 Patch015: linux-2.6-015-igb.patch
 Patch017: linux-2.6-017-bnx2.patch
 Patch020: linux-2.6-020-build-id.patch
+Patch021: linux-2.6-021-bcm.patch
 Patch030: linux-2.6-030-netns.patch
 Patch040: linux-2.6-040-i_mutex-check.patch
 Patch050: linux-2.6-050-getline.patch
@@ -401,6 +402,7 @@ KERNEL_PREVIOUS=vanilla
 %ApplyPatch 15
 %ApplyPatch 17
 %ApplyPatch 20
+%ApplyPatch 21
 
 # NetNS patch for VINI
 %if 0%{?with_netns}
