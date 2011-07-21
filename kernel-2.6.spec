@@ -195,6 +195,7 @@ Patch800: linux-2.6-800-rename-ext4dev-to-ext4.patch
 
 #Patch900: linux-2.6-900-ext3_mount_default_to_barrier.patch
 #Patch910: linux-2.6-910-support_barriers_on_single_device_dm_devices.patch
+Patch911: linux-2.6-911-linux-2.6-911-perftools-f8-build.patch
 
 BuildRoot: %{_tmppath}/kernel-%{KVERREL}-root
 
