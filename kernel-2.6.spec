@@ -10,7 +10,7 @@ URL: %{SCMURL}
 
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 22
+%define taglevel 23
 
 %define sublevel 32
 
@@ -1787,6 +1787,9 @@ fi
 %endif
 
 %changelog
+* Tue Aug 09 2011 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-32-23
+- The option commented out in this patch braeks the build on f8.
+
 * Thu Jul 07 2011 Thierry Parmentelat <thierry.parmentelat@sophia.inria.fr> - linux-2.6-32-22
 - fixed specfile for --without firmware
 
