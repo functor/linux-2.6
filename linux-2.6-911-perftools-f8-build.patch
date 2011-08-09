@@ -1,0 +1,12 @@
+diff -up linux-2.6.32-22.planetlab.i686/tools/perf/Makefile.orig linux-2.6.32-22.planetlab.i686/tools/perf/Makefile
+--- linux-2.6.32-22.planetlab.i686/tools/perf/Makefile.orig	2011-07-21 10:27:04.816021371 -0400
++++ linux-2.6.32-22.planetlab.i686/tools/perf/Makefile	2011-07-21 10:27:16.325140524 -0400
+@@ -219,7 +219,7 @@ EXTRA_WARNINGS := $(EXTRA_WARNINGS) -Wde
+ #
+ 
+ LESS_WARNINGS := -Wno-system-headers
+-LESS_WARNINGS := $(LESS_WARNINGS) -Wno-unused-but-set-variable
++LESS_WARNINGS := $(LESS_WARNINGS) #-Wno-unused-but-set-variable
+ 
+ ifeq ("$(origin DEBUG)", "command line")
+   PERF_DEBUG = $(DEBUG)
