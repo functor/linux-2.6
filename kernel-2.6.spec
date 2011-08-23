@@ -23,7 +23,7 @@ Summary: The Linux kernel (the core of the Linux operating system)
 # for module-tag.py - sublevel is used for the version (middle) part of tag names
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 36
+%define taglevel 37
 
 #
 # Polite request for people who spin their own kernel rpms:
@@ -837,6 +837,9 @@ rm -f /lib/modules/%{KVERREL}uml/modules.*
 %endif
 
 %changelog
+* Tue Aug 23 2011 Thierry Parmentelat <thierry.parmentelat@sophia.inria.fr> - linux-2.6-27-37
+- fixed patch filename
+
 * Thu Jul 21 2011 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-27-36
 - This patch fixes an issue that causes Build to fail on f8.
 
