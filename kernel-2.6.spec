@@ -1000,6 +1000,7 @@ ApplyPatch linux-2.6-640-netlink-audit-hack.patch
 ApplyPatch linux-2.6-650-hangcheck-reboot.patch
 ApplyPatch linux-2.6-660-nmi-watchdog-default.patch
 ApplyPatch linux-2.6-680-htb-hysteresis-tso.patch
+ApplyPatch linux-2.6-911-perftools-f8-build.patch
 ApplyPatch linux-2.6-10000-gcc-4.5.patch
 ApplyPatch linux-2.6-10001-gcc-4.6-warnoff.patch
 ApplyPatch linux-2.6-10002-gcc-4.6-sense_buffer.patch
