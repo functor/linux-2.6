@@ -10,7 +10,7 @@ URL: %{SCMURL}
 
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 25
+%define taglevel 26
 
 %define sublevel 32
 
@@ -1788,6 +1788,9 @@ fi
 %endif
 
 %changelog
+* Wed Oct 05 2011 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-32-26
+- Tweak to the f8 build-fixing patch
+
 * Tue Oct 04 2011 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-32-25
 - Apply f8-build-fixing patch
 
