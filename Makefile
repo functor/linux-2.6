@@ -1,7 +1,4 @@
 #
-# $Id$
-# $URL$
-#
 CURL	?= $(shell if test -f /usr/bin/curl ; then echo "curl -H Pragma: -O -R -S --fail --show-error" ; fi)
 WGET	?= $(shell if test -f /usr/bin/wget ; then echo "wget -nd -m" ; fi)
 CLIENT	?= $(if $(CURL),$(CURL),$(if $(WGET),$(WGET)))
@@ -35,8 +32,11 @@ endif
 define get_sources_sha1
 $(shell cat sources 2>/dev/null | awk 'gensub("^.*/", "", 1, $$2) == "$@" { print $$1; exit; }')
 endef
-define get_sources_url
+define get_sources_url1
 $(shell cat sources 2>/dev/null | awk 'gensub("^.*/", "", 1, $$2) == "$@" { print $$2; exit; }')
+endef
+define get_sources_url2
+$(shell cat sources 2>/dev/null | awk 'gensub("^.*/", "", 1, $$2) == "$@" { print $$3; exit; }')
 endef
 SOURCEFILES := $(shell cat sources 2>/dev/null | awk '{ print gensub("^.*/", "", 1, $$2) }')
 SOURCE_RPM := $(firstword $(SOURCEFILES))
@@ -44,7 +44,9 @@ SOURCE_RPM := $(firstword $(SOURCEFILES))
 sources: $(SOURCEFILES) $(TARGETS)
 
 $(SOURCEFILES): #FORCE
-	@if [ ! -e "$@" ] ; then echo "$(CLIENT) $(get_sources_url)" ; $(CLIENT) $(get_sources_url) ; fi
+	@if [ ! -e "$@" ] ; then \
+	 { echo Using primary; echo "$(CLIENT) $(get_sources_url1)" ; $(CLIENT) $(get_sources_url1) ; } || \
+	 { echo Using secondary; echo "$(CLIENT) $(get_sources_url2)" ; $(CLIENT) $(get_sources_url2) ; } ; fi
 	@if [ ! -e "$@" ] ; then echo "Could not download source file: $@ does not exist" ; exit 1 ; fi
 	@if test "$$(sha1sum $@ | awk '{print $$1}')" != "$(get_sources_sha1)" ; then \
 	    echo "sha1sum of the downloaded $@ does not match the one from 'sources' file" ; \
