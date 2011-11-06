@@ -10,7 +10,7 @@ URL: %{SCMURL}
 
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 25
+%define taglevel 26
 
 %define sublevel 32
 
@@ -681,13 +681,13 @@ Patch17: linux-2.6-640-netlink-audit-hack.patch
 Patch18: linux-2.6-650-hangcheck-reboot.patch
 Patch19: linux-2.6-660-nmi-watchdog-default.patch
 Patch20: linux-2.6-680-htb-hysteresis-tso.patch
-Patch21: linux-2.6-911-perftools-f8-build.patch
 
 Patch10000: linux-2.6-10000-gcc-4.5.patch
 Patch10001: linux-2.6-10001-gcc-4.6-warnoff.patch
 Patch10002: linux-2.6-10002-gcc-4.6-sense_buffer.patch
 Patch10003: linux-2.6-10003-gcc-4.6-vdso.patch
 Patch10004: linux-2.6-10004-gcc-4.6-perf.patch
+Patch10911: linux-2.6-10911-perftools-f8-build.patch
 # empty final patch file to facilitate testing of kernel patches
 Patch999999: linux-kernel-test.patch
 
@@ -1000,12 +1000,12 @@ ApplyPatch linux-2.6-640-netlink-audit-hack.patch
 ApplyPatch linux-2.6-650-hangcheck-reboot.patch
 ApplyPatch linux-2.6-660-nmi-watchdog-default.patch
 ApplyPatch linux-2.6-680-htb-hysteresis-tso.patch
-ApplyPatch linux-2.6-911-perftools-f8-build.patch
 ApplyPatch linux-2.6-10000-gcc-4.5.patch
 ApplyPatch linux-2.6-10001-gcc-4.6-warnoff.patch
 ApplyPatch linux-2.6-10002-gcc-4.6-sense_buffer.patch
 ApplyPatch linux-2.6-10003-gcc-4.6-vdso.patch
 ApplyPatch linux-2.6-10004-gcc-4.6-perf.patch
+ApplyPatch linux-2.6-10911-perftools-f8-build.patch
 #### Planet-Lab ####
 
 ApplyOptionalPatch linux-kernel-test.patch
@@ -1788,6 +1788,9 @@ fi
 %endif
 
 %changelog
+* Wed Oct 05 2011 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-32-26
+- Tweak to the f8 build-fixing patch
+
 * Tue Oct 04 2011 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-32-25
 - Apply f8-build-fixing patch
 
