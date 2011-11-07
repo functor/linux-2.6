@@ -10,7 +10,7 @@ URL: %{SCMURL}
 
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 26
+%define taglevel 27
 
 %define sublevel 32
 
@@ -1788,6 +1788,9 @@ fi
 %endif
 
 %changelog
+* Mon Nov 07 2011 Thierry Parmentelat <thierry.parmentelat@sophia.inria.fr> - linux-2.6-32-27
+- 2 places for pulling sources from in case of network outage
+
 * Wed Oct 05 2011 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-32-26
 - Tweak to the f8 build-fixing patch
 
