@@ -1,0 +1,11 @@
+The Web100 patch (linux-2.6-690-web100.patch) is based on the patch here:
+
+http://www.web100.org/download/kernel/2.5.27/web100-2.5.27-201001301335.tar.gz
+
+A number of hunks did not apply cleanly against our patched PlanetLab
+kernel.  I tried to manually resolve these conflicts.  Additionally,
+some of the networking code looks to have been refactored, and so a
+couple of hunks that applied cleanly to tcp_ipv[46].c caused
+compile-time errors/warnings.  I fixed these as best I could.
+
+Andy
