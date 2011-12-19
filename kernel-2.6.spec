@@ -1142,6 +1142,11 @@ BuildKernel() {
     sed -i -e "s:-Wno-array-bounds -Werror:-Wno-array-bounds:g" Makefile
     #### Planet-Lab ####
 
+    #### Planet-Lab ####
+    # -Werror breaks F16 builds in tools/perf
+    sed -i -e "s: -Werror : :g" tools/perf/Makefile
+    #### Planet-Lab ####
+
     # and now to start the build process
 
     make -s mrproper
