@@ -1117,8 +1117,9 @@ BuildKernel() {
     %endif
 
     #### Planet-Lab ####
-    # -Werror breaks F14 builds
+    # -Werror breaks F14+ builds
     sed -i -e "s:-Wno-array-bounds -Werror:-Wno-array-bounds:g" Makefile
+    sed -i -e "s: -Werror::g" tools/perf/Makefile
     #### Planet-Lab ####
 
     # and now to start the build process
