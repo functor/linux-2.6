@@ -689,6 +689,7 @@ Patch19: linux-2.6-660-nmi-watchdog-default.patch
 Patch20: linux-2.6-680-htb-hysteresis-tso.patch
 
 Patch10000: linux-2.6-10000-gcc-4.5.patch
+Patch10001: linux-2.6-10001-f16-fix.patch
 # empty final patch file to facilitate testing of kernel patches
 Patch999999: linux-kernel-test.patch
 
@@ -985,6 +986,7 @@ ApplyPatch linux-2.6-650-hangcheck-reboot.patch
 ApplyPatch linux-2.6-660-nmi-watchdog-default.patch
 ApplyPatch linux-2.6-680-htb-hysteresis-tso.patch
 ApplyPatch linux-2.6-10000-gcc-4.5.patch
+ApplyPatch linux-2.6-10001-f16-fix.patch
 #### Planet-Lab ####
 
 ApplyOptionalPatch linux-kernel-test.patch

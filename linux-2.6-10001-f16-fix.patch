@@ -1,0 +1,11 @@
+--- linux-2.6.32-71.24.1.el6.i686/arch/x86/kernel/entry_64.S.orig	2011-03-26 14:42:29.000000000 -0400
++++ linux-2.6.32-71.24.1.el6.i686/arch/x86/kernel/entry_64.S	2012-01-24 12:27:39.000000000 -0500
+@@ -1303,7 +1303,7 @@
+ 	decl PER_CPU_VAR(irq_count)
+ 	jmp  error_exit
+ 	CFI_ENDPROC
+-END(do_hypervisor_callback)
++END(xen_do_hypervisor_callback)
+ 
+ /*
+  * Hypervisor uses this for application faults while it executes.
