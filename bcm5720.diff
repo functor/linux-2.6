@@ -1,0 +1,888 @@
+diff -Nurb linux-2.6.32-27.planetlab.i686/drivers/net/tg3.c ../kernel-2.6/linux-2.6.32-27.planetlab.i686/drivers/net/tg3.c
+--- linux-2.6.32-27.planetlab.i686/drivers/net/tg3.c	2011-05-10 14:38:09.000000000 -0400
++++ ../kernel-2.6/linux-2.6.32-27.planetlab.i686/drivers/net/tg3.c	2012-05-01 10:09:30.502846530 -0400
+@@ -103,14 +103,12 @@
+  * them in the NIC onboard memory.
+  */
+ #define TG3_RX_STD_RING_SIZE(tp) \
+-	((GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5717 || \
+-	  GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5719) ? \
+-	 RX_STD_MAX_SIZE_5717 : 512)
++	((tp->tg3_flags3 & TG3_FLG3_LRG_PROD_RING_CAP) ? \
++	 TG3_RX_STD_MAX_SIZE_5717 : TG3_RX_STD_MAX_SIZE_5700)
+ #define TG3_DEF_RX_RING_PENDING		200
+ #define TG3_RX_JMB_RING_SIZE(tp) \
+-	((GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5717 || \
+-	  GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5719) ? \
+-	 1024 : 256)
++	((tp->tg3_flags3 & TG3_FLG3_LRG_PROD_RING_CAP) ? \
++	 TG3_RX_JMB_MAX_SIZE_5717 : TG3_RX_JMB_MAX_SIZE_5700)
+ #define TG3_DEF_RX_JUMBO_RING_PENDING	100
+ #define TG3_RSS_INDIR_TBL_SIZE		128
+ 
+@@ -276,6 +274,7 @@
+ 	{PCI_DEVICE(PCI_VENDOR_ID_BROADCOM, TG3PCI_DEVICE_TIGON3_57791)},
+ 	{PCI_DEVICE(PCI_VENDOR_ID_BROADCOM, TG3PCI_DEVICE_TIGON3_57795)},
+ 	{PCI_DEVICE(PCI_VENDOR_ID_BROADCOM, TG3PCI_DEVICE_TIGON3_5719)},
++	{PCI_DEVICE(PCI_VENDOR_ID_BROADCOM, TG3PCI_DEVICE_TIGON3_5720)},
+ 	{PCI_DEVICE(PCI_VENDOR_ID_SYSKONNECT, PCI_DEVICE_ID_SYSKONNECT_9DXX)},
+ 	{PCI_DEVICE(PCI_VENDOR_ID_SYSKONNECT, PCI_DEVICE_ID_SYSKONNECT_9MXX)},
+ 	{PCI_DEVICE(PCI_VENDOR_ID_ALTIMA, PCI_DEVICE_ID_ALTIMA_AC1000)},
+@@ -1090,8 +1089,7 @@
+ 	u32 reg;
+ 	struct phy_device *phydev;
+ 
+-	if (GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5717 ||
+-	    GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5719) {
++	if (tp->tg3_flags3 & TG3_FLG3_5717_PLUS) {
+ 		u32 is_serdes;
+ 
+ 		tp->phy_addr = PCI_FUNC(tp->pdev->devfn) + 1;
+@@ -1669,8 +1667,7 @@
+ 	u32 reg;
+ 
+ 	if (!(tp->tg3_flags2 & TG3_FLG2_5705_PLUS) ||
+-	    ((GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5717 ||
+-	      GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5719) &&
++	    ((tp->tg3_flags3 & TG3_FLG3_5717_PLUS) &&
+ 	     (tp->phy_flags & TG3_PHYFLG_MII_SERDES)))
+ 		return;
+ 
+@@ -2080,8 +2077,7 @@
+ 		}
+ 	}
+ 
+-	if ((GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5717 ||
+-	     GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5719) &&
++	if ((tp->tg3_flags3 & TG3_FLG3_5717_PLUS) &&
+ 	    (tp->phy_flags & TG3_PHYFLG_MII_SERDES))
+ 		return 0;
+ 
+@@ -2167,7 +2163,8 @@
+ 
+ 	if (GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5704 ||
+ 	    GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5714 ||
+-	    GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5717) {
++	    GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5717) || 
++            GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5720))
+ 		struct net_device *dev_peer;
+ 
+ 		dev_peer = pci_get_drvdata(tp->pdev_peer);
+@@ -4431,6 +4428,7 @@
+ 
+ static int tg3_setup_phy(struct tg3 *tp, int force_reset)
+ {
++	u32 val;
+ 	int err;
+ 
+ 	if (tp->phy_flags & TG3_PHYFLG_PHY_SERDES)
+@@ -4441,7 +4439,7 @@
+ 		err = tg3_setup_copper_phy(tp, force_reset);
+ 
+ 	if (GET_CHIP_REV(tp->pci_chip_rev_id) == CHIPREV_5784_AX) {
+-		u32 val, scale;
++		u32 scale;
+ 
+ 		val = tr32(TG3_CPMU_CLCK_STAT) & CPMU_CLCK_STAT_MAC_CLCK_MASK;
+ 		if (val == CPMU_CLCK_STAT_MAC_CLCK_62_5)
+@@ -4456,17 +4454,20 @@
+ 		tw32(GRC_MISC_CFG, val);
+ 	}
+ 
++	val = (2 << TX_LENGTHS_IPG_CRS_SHIFT) |
++	      (6 << TX_LENGTHS_IPG_SHIFT);
++	if (GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5720)
++		val |= tr32(MAC_TX_LENGTHS) &
++		       (TX_LENGTHS_JMB_FRM_LEN_MSK |
++			TX_LENGTHS_CNT_DWN_VAL_MSK);
++
+ 	if (tp->link_config.active_speed == SPEED_1000 &&
+ 	    tp->link_config.active_duplex == DUPLEX_HALF)
+-		tw32(MAC_TX_LENGTHS,
+-		     ((2 << TX_LENGTHS_IPG_CRS_SHIFT) |
+-		      (6 << TX_LENGTHS_IPG_SHIFT) |
+-		      (0xff << TX_LENGTHS_SLOT_TIME_SHIFT)));
++		tw32(MAC_TX_LENGTHS, val |
++		     (0xff << TX_LENGTHS_SLOT_TIME_SHIFT));
+ 	else
+-		tw32(MAC_TX_LENGTHS,
+-		     ((2 << TX_LENGTHS_IPG_CRS_SHIFT) |
+-		      (6 << TX_LENGTHS_IPG_SHIFT) |
+-		      (32 << TX_LENGTHS_SLOT_TIME_SHIFT)));
++		tw32(MAC_TX_LENGTHS, val |
++		     (32 << TX_LENGTHS_SLOT_TIME_SHIFT));
+ 
+ 	if (!(tp->tg3_flags2 & TG3_FLG2_5705_PLUS)) {
+ 		if (netif_carrier_ok(tp->dev)) {
+@@ -4478,7 +4479,7 @@
+ 	}
+ 
+ 	if (tp->tg3_flags & TG3_FLAG_ASPM_WORKAROUND) {
+-		u32 val = tr32(PCIE_PWR_MGMT_THRESH);
++		val = tr32(PCIE_PWR_MGMT_THRESH);
+ 		if (!netif_carrier_ok(tp->dev))
+ 			val = (val & ~PCIE_PWR_MGMT_L1_THRESH_MSK) |
+ 			      tp->pwrmgmt_thresh;
+@@ -7085,7 +7086,7 @@
+ 	if (tp->tg3_flags2 & TG3_FLG2_PCI_EXPRESS) {
+ 		/* Force PCIe 1.0a mode */
+ 		if (GET_ASIC_REV(tp->pci_chip_rev_id) != ASIC_REV_5785 &&
+-		    !(tp->tg3_flags3 & TG3_FLG3_5717_PLUS) &&
++		    !(tp->tg3_flags3 & TG3_FLG3_57765_PLUS) &&
+ 		    tr32(TG3_PCIE_PHY_TSTCTL) ==
+ 		    (TG3_PCIE_PHY_TSTCTL_PCIE10 | TG3_PCIE_PHY_TSTCTL_PSCRAM))
+ 			tw32(TG3_PCIE_PHY_TSTCTL, TG3_PCIE_PHY_TSTCTL_PSCRAM);
+@@ -7236,12 +7237,17 @@
+ 	if ((tp->tg3_flags2 & TG3_FLG2_PCI_EXPRESS) &&
+ 	    tp->pci_chip_rev_id != CHIPREV_ID_5750_A0 &&
+ 	    GET_ASIC_REV(tp->pci_chip_rev_id) != ASIC_REV_5785 &&
+-	    !(tp->tg3_flags3 & TG3_FLG3_5717_PLUS)) {
++	    !(tp->tg3_flags3 & TG3_FLG3_57765_PLUS)) {
+ 		val = tr32(0x7c00);
+ 
+ 		tw32(0x7c00, val | (1 << 25));
+ 	}
+ 
++	if (GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5720) {
++		val = tr32(TG3_CPMU_CLCK_ORIDE);
++		tw32(TG3_CPMU_CLCK_ORIDE, val & ~CPMU_CLCK_ORIDE_MAC_ORIDE_EN);
++	}
++
+ 	/* Reprobe ASF enable state.  */
+ 	tp->tg3_flags &= ~TG3_FLAG_ENABLE_ASF;
+ 	tp->tg3_flags2 &= ~TG3_FLG2_ASF_NEW_HANDSHAKE;
+@@ -7659,6 +7665,8 @@
+ 	/* Disable all transmit rings but the first. */
+ 	if (!(tp->tg3_flags2 & TG3_FLG2_5705_PLUS))
+ 		limit = NIC_SRAM_SEND_RCB + TG3_BDINFO_SIZE * 16;
++ 	else if (tp->tg3_flags3 & TG3_FLG3_5717_PLUS)
++  		limit = NIC_SRAM_SEND_RCB + TG3_BDINFO_SIZE * 4;
+ 	else if (GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_57765)
+ 		limit = NIC_SRAM_SEND_RCB + TG3_BDINFO_SIZE * 2;
+ 	else
+@@ -7671,8 +7679,7 @@
+ 
+ 
+ 	/* Disable all receive return rings but the first. */
+-	if (GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5717 ||
+-	    GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5719)
++	if (tp->tg3_flags3 & TG3_FLG3_5717_PLUS)
+ 		limit = NIC_SRAM_RCV_RET_RCB + TG3_BDINFO_SIZE * 17;
+ 	else if (!(tp->tg3_flags2 & TG3_FLG2_5705_PLUS))
+ 		limit = NIC_SRAM_RCV_RET_RCB + TG3_BDINFO_SIZE * 16;
+@@ -7943,7 +7950,7 @@
+ 	if (err)
+ 		return err;
+ 
+-	if (tp->tg3_flags3 & TG3_FLG3_5717_PLUS) {
++	if (tp->tg3_flags3 & TG3_FLG3_57765_PLUS) {
+ 		val = tr32(TG3PCI_DMA_RW_CTRL) &
+ 		      ~DMA_RWCTRL_DIS_CACHE_ALIGNMENT;
+ 		if (tp->pci_chip_rev_id == CHIPREV_ID_57765_A0)
+@@ -8074,8 +8081,7 @@
+ 	     ((u64) tpr->rx_std_mapping >> 32));
+ 	tw32(RCVDBDI_STD_BD + TG3_BDINFO_HOST_ADDR + TG3_64BIT_REG_LOW,
+ 	     ((u64) tpr->rx_std_mapping & 0xffffffff));
+-	if (GET_ASIC_REV(tp->pci_chip_rev_id) != ASIC_REV_5717 &&
+-	    GET_ASIC_REV(tp->pci_chip_rev_id) != ASIC_REV_5719)
++	if (!(tp->tg3_flags3 & TG3_FLG3_5717_PLUS))
+ 		tw32(RCVDBDI_STD_BD + TG3_BDINFO_NIC_ADDR,
+ 		     NIC_SRAM_RX_BUFFER_DESC);
+ 
+@@ -8097,9 +8103,10 @@
+ 			     ((u64) tpr->rx_jmb_mapping >> 32));
+ 			tw32(RCVDBDI_JUMBO_BD + TG3_BDINFO_HOST_ADDR + TG3_64BIT_REG_LOW,
+ 			     ((u64) tpr->rx_jmb_mapping & 0xffffffff));
++			val = TG3_RX_JMB_RING_SIZE(tp) <<
++			      BDINFO_FLAGS_MAXLEN_SHIFT;
+ 			tw32(RCVDBDI_JUMBO_BD + TG3_BDINFO_MAXLEN_FLAGS,
+-			     (RX_JUMBO_MAX_SIZE << BDINFO_FLAGS_MAXLEN_SHIFT) |
+-			     BDINFO_FLAGS_USE_EXT_RECV);
++			     val | BDINFO_FLAGS_USE_EXT_RECV);
+ 			if (!(tp->tg3_flags3 & TG3_FLG3_USE_JUMBO_BDFLAG) ||
+ 			    GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_57765)
+ 				tw32(RCVDBDI_JUMBO_BD + TG3_BDINFO_NIC_ADDR,
+@@ -8109,17 +8116,17 @@
+ 			     BDINFO_FLAGS_DISABLED);
+ 		}
+ 
+-		if (tp->tg3_flags3 & TG3_FLG3_5717_PLUS) {
++		if (tp->tg3_flags3 & TG3_FLG3_57765_PLUS) {
+ 			if (GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_57765)
+-				val = RX_STD_MAX_SIZE_5705;
++				val = TG3_RX_STD_MAX_SIZE_5700;
+ 			else
+-				val = RX_STD_MAX_SIZE_5717;
++				val = TG3_RX_STD_MAX_SIZE_5717;
+ 			val <<= BDINFO_FLAGS_MAXLEN_SHIFT;
+ 			val |= (TG3_RX_STD_DMA_SZ << 2);
+ 		} else
+ 			val = TG3_RX_STD_DMA_SZ << BDINFO_FLAGS_MAXLEN_SHIFT;
+ 	} else
+-		val = RX_STD_MAX_SIZE_5705 << BDINFO_FLAGS_MAXLEN_SHIFT;
++		val = TG3_RX_STD_MAX_SIZE_5700 << BDINFO_FLAGS_MAXLEN_SHIFT;
+ 
+ 	tw32(RCVDBDI_STD_BD + TG3_BDINFO_MAXLEN_FLAGS, val);
+ 
+@@ -8130,7 +8137,7 @@
+ 			  tp->rx_jumbo_pending : 0;
+ 	tw32_rx_mbox(TG3_RX_JMB_PROD_IDX_REG, tpr->rx_jmb_prod_idx);
+ 
+-	if (tp->tg3_flags3 & TG3_FLG3_5717_PLUS) {
++	if (tp->tg3_flags3 & TG3_FLG3_57765_PLUS) {
+ 		tw32(STD_REPLENISH_LWM, 32);
+ 		tw32(JMB_REPLENISH_LWM, 16);
+ 	}
+@@ -8147,10 +8154,16 @@
+ 	/* The slot time is changed by tg3_setup_phy if we
+ 	 * run at gigabit with half duplex.
+ 	 */
+-	tw32(MAC_TX_LENGTHS,
+-	     (2 << TX_LENGTHS_IPG_CRS_SHIFT) |
++	val = (2 << TX_LENGTHS_IPG_CRS_SHIFT) |
+ 	     (6 << TX_LENGTHS_IPG_SHIFT) |
+-	     (32 << TX_LENGTHS_SLOT_TIME_SHIFT));
++	      (32 << TX_LENGTHS_SLOT_TIME_SHIFT);
++
++	if (GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5720)
++		val |= tr32(MAC_TX_LENGTHS) &
++		       (TX_LENGTHS_JMB_FRM_LEN_MSK |
++			TX_LENGTHS_CNT_DWN_VAL_MSK);
++
++	tw32(MAC_TX_LENGTHS, val);
+ 
+ 	/* Receive rules. */
+ 	tw32(MAC_RCV_RULE_CFG, RCV_RULE_CFG_DEFAULT_CLASS);
+@@ -8199,13 +8212,17 @@
+ 	    GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_57780)
+ 		rdmac_mode |= RDMAC_MODE_IPV6_LSO_EN;
+ 
++	if (GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5720)
++ 		rdmac_mode |= tr32(RDMAC_MODE) & RDMAC_MODE_H2BNC_VLAN_DET;
++
+ 	if (GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5761 ||
+ 	    GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5784 ||
+ 	    GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5785 ||
+ 	    GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_57780 ||
+-	    (tp->tg3_flags3 & TG3_FLG3_5717_PLUS)) {
++	    (tp->tg3_flags3 & TG3_FLG3_57765_PLUS)) {
+ 		val = tr32(TG3_RDMA_RSRVCTRL_REG);
+-		if (GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5719) {
++		if (GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5719 ||
++		    GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5720) {
+ 			val &= ~TG3_RDMA_RSRVCTRL_TXMRGN_MASK;
+ 			val |= TG3_RDMA_RSRVCTRL_TXMRGN_320B;
+ 		}
+@@ -8213,7 +8230,8 @@
+ 		     val | TG3_RDMA_RSRVCTRL_FIFO_OFLW_FIX);
+ 	}
+ 
+-	if (GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5719) {
++	if (GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5719 ||
++	    GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5720) {
+ 		val = tr32(TG3_LSO_RD_DMA_CRPTEN_CTRL);
+ 		tw32(TG3_LSO_RD_DMA_CRPTEN_CTRL, val |
+ 		     TG3_LSO_RD_DMA_CRPTEN_CTRL_BLEN_BD_4K |
+@@ -8403,8 +8421,7 @@
+ 	tw32(SNDBDC_MODE, SNDBDC_MODE_ENABLE | SNDBDC_MODE_ATTN_ENABLE);
+ 	tw32(RCVBDI_MODE, RCVBDI_MODE_ENABLE | RCVBDI_MODE_RCB_ATTN_ENAB);
+ 	val = RCVDBDI_MODE_ENABLE | RCVDBDI_MODE_INV_RING_SZ;
+-	if (GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5717 ||
+-	    GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5719)
++	if (tp->tg3_flags3 & TG3_FLG3_LRG_PROD_RING_CAP)
+ 		val |= RCVDBDI_MODE_LRG_RING_SZ;
+ 	tw32(RCVDBDI_MODE, val);
+ 	tw32(SNDDATAI_MODE, SNDDATAI_MODE_ENABLE);
+@@ -8429,9 +8446,17 @@
+ 	}
+ 
+ 	tp->tx_mode = TX_MODE_ENABLE;
++
+ 	if ((tp->tg3_flags3 & TG3_FLG3_5755_PLUS) ||
+ 	    GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5906)
+ 		tp->tx_mode |= TX_MODE_MBUF_LOCKUP_FIX;
++
++	if (GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5720) {
++		val = TX_MODE_JMB_FRM_LEN | TX_MODE_CNT_DN_MODE;
++		tp->tx_mode &= ~val;
++		tp->tx_mode |= tr32(MAC_TX_MODE) & val;
++	}
++
+ 	tw32_f(MAC_TX_MODE, tp->tx_mode);
+ 	udelay(100);
+ 
+@@ -8850,7 +8875,7 @@
+ 	 * Turn off MSI one shot mode.  Otherwise this test has no
+ 	 * observable way to know whether the interrupt was delivered.
+ 	 */
+-	if ((tp->tg3_flags3 & TG3_FLG3_5717_PLUS) &&
++	if ((tp->tg3_flags3 & TG3_FLG3_57765_PLUS) &&
+ 	    (tp->tg3_flags2 & TG3_FLG2_USING_MSI)) {
+ 		val = tr32(MSGINT_MODE) | MSGINT_MODE_ONE_SHOT_DISABLE;
+ 		tw32(MSGINT_MODE, val);
+@@ -8893,7 +8918,7 @@
+ 
+ 	if (intr_ok) {
+ 		/* Reenable MSI one shot mode. */
+-		if ((tp->tg3_flags3 & TG3_FLG3_5717_PLUS) &&
++		if ((tp->tg3_flags3 & TG3_FLG3_57765_PLUS) &&
+ 		    (tp->tg3_flags2 & TG3_FLG2_USING_MSI)) {
+ 			val = tr32(MSGINT_MODE) & ~MSGINT_MODE_ONE_SHOT_DISABLE;
+ 			tw32(MSGINT_MODE, val);
+@@ -9034,7 +9059,9 @@
+ 	tp->dev->real_num_tx_queues = 1;
+ 	if (tp->irq_cnt > 1) {
+ 		tp->tg3_flags3 |= TG3_FLG3_ENABLE_RSS;
+-		if (GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5719) {
++
++		if (GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5719 ||
++		    GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5720) {
+ 			tp->tg3_flags3 |= TG3_FLG3_ENABLE_TSS;
+ 			netif_set_real_num_tx_queues(tp->dev, tp->irq_cnt - 1);
+ 		}
+@@ -9186,7 +9213,7 @@
+ 			goto err_out2;
+ 		}
+ 
+-		if (!(tp->tg3_flags3 & TG3_FLG3_5717_PLUS) &&
++		if (!(tp->tg3_flags3 & TG3_FLG3_57765_PLUS) &&
+ 		    (tp->tg3_flags2 & TG3_FLG2_USING_MSI)) {
+ 			u32 val = tr32(PCIE_TRANSACTION_CFG);
+ 
+@@ -10796,8 +10823,7 @@
+ 	int err = 0;
+ 	int i;
+ 
+-	if (GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5717 ||
+-	    GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5719)
++	if (tp->tg3_flags3 & TG3_FLG3_5717_PLUS)
+ 		mem_tbl = mem_tbl_5717;
+ 	else if (GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_57765)
+ 		mem_tbl = mem_tbl_57765;
+@@ -11788,6 +11814,8 @@
+ 
+ 		switch (nvcfg1 & NVRAM_CFG1_5752VENDOR_MASK) {
+ 		case FLASH_5717VENDOR_ATMEL_MDB021D:
++			/* Detect size with tg3_nvram_get_size() */
++			break;
+ 		case FLASH_5717VENDOR_ATMEL_ADB021B:
+ 		case FLASH_5717VENDOR_ATMEL_ADB021D:
+ 			tp->nvram_size = TG3_NVRAM_SIZE_256KB;
+@@ -11813,8 +11841,10 @@
+ 
+ 		switch (nvcfg1 & NVRAM_CFG1_5752VENDOR_MASK) {
+ 		case FLASH_5717VENDOR_ST_M_M25PE20:
+-		case FLASH_5717VENDOR_ST_A_M25PE20:
+ 		case FLASH_5717VENDOR_ST_M_M45PE20:
++			/* Detect size with tg3_nvram_get_size() */
++			break;
++		case FLASH_5717VENDOR_ST_A_M25PE20:
+ 		case FLASH_5717VENDOR_ST_A_M45PE20:
+ 			tp->nvram_size = TG3_NVRAM_SIZE_256KB;
+ 			break;
+@@ -11833,6 +11863,118 @@
+ 		tp->tg3_flags3 |= TG3_FLG3_NO_NVRAM_ADDR_TRANS;
+ }
+ 
++static void __devinit tg3_get_5720_nvram_info(struct tg3 *tp)
++{
++	u32 nvcfg1, nvmpinstrp;
++
++	nvcfg1 = tr32(NVRAM_CFG1);
++	nvmpinstrp = nvcfg1 & NVRAM_CFG1_5752VENDOR_MASK;
++
++	switch (nvmpinstrp) {
++	case FLASH_5720_EEPROM_HD:
++	case FLASH_5720_EEPROM_LD:
++		tp->nvram_jedecnum = JEDEC_ATMEL;
++		tp->tg3_flags |= TG3_FLAG_NVRAM_BUFFERED;
++
++		nvcfg1 &= ~NVRAM_CFG1_COMPAT_BYPASS;
++		tw32(NVRAM_CFG1, nvcfg1);
++		if (nvmpinstrp == FLASH_5720_EEPROM_HD)
++			tp->nvram_pagesize = ATMEL_AT24C512_CHIP_SIZE;
++		else
++			tp->nvram_pagesize = ATMEL_AT24C02_CHIP_SIZE;
++		return;
++	case FLASH_5720VENDOR_M_ATMEL_DB011D:
++	case FLASH_5720VENDOR_A_ATMEL_DB011B:
++	case FLASH_5720VENDOR_A_ATMEL_DB011D:
++	case FLASH_5720VENDOR_M_ATMEL_DB021D:
++	case FLASH_5720VENDOR_A_ATMEL_DB021B:
++	case FLASH_5720VENDOR_A_ATMEL_DB021D:
++	case FLASH_5720VENDOR_M_ATMEL_DB041D:
++	case FLASH_5720VENDOR_A_ATMEL_DB041B:
++	case FLASH_5720VENDOR_A_ATMEL_DB041D:
++	case FLASH_5720VENDOR_M_ATMEL_DB081D:
++	case FLASH_5720VENDOR_A_ATMEL_DB081D:
++	case FLASH_5720VENDOR_ATMEL_45USPT:
++		tp->nvram_jedecnum = JEDEC_ATMEL;
++		tp->tg3_flags |= TG3_FLAG_NVRAM_BUFFERED;
++		tp->tg3_flags2 |= TG3_FLG2_FLASH;
++
++		switch (nvmpinstrp) {
++		case FLASH_5720VENDOR_M_ATMEL_DB021D:
++		case FLASH_5720VENDOR_A_ATMEL_DB021B:
++		case FLASH_5720VENDOR_A_ATMEL_DB021D:
++			tp->nvram_size = TG3_NVRAM_SIZE_256KB;
++			break;
++		case FLASH_5720VENDOR_M_ATMEL_DB041D:
++		case FLASH_5720VENDOR_A_ATMEL_DB041B:
++		case FLASH_5720VENDOR_A_ATMEL_DB041D:
++			tp->nvram_size = TG3_NVRAM_SIZE_512KB;
++			break;
++		case FLASH_5720VENDOR_M_ATMEL_DB081D:
++		case FLASH_5720VENDOR_A_ATMEL_DB081D:
++			tp->nvram_size = TG3_NVRAM_SIZE_1MB;
++			break;
++		default:
++			tp->nvram_size = TG3_NVRAM_SIZE_128KB;
++			break;
++		}
++		break;
++	case FLASH_5720VENDOR_M_ST_M25PE10:
++	case FLASH_5720VENDOR_M_ST_M45PE10:
++	case FLASH_5720VENDOR_A_ST_M25PE10:
++	case FLASH_5720VENDOR_A_ST_M45PE10:
++	case FLASH_5720VENDOR_M_ST_M25PE20:
++	case FLASH_5720VENDOR_M_ST_M45PE20:
++	case FLASH_5720VENDOR_A_ST_M25PE20:
++	case FLASH_5720VENDOR_A_ST_M45PE20:
++	case FLASH_5720VENDOR_M_ST_M25PE40:
++	case FLASH_5720VENDOR_M_ST_M45PE40:
++	case FLASH_5720VENDOR_A_ST_M25PE40:
++	case FLASH_5720VENDOR_A_ST_M45PE40:
++	case FLASH_5720VENDOR_M_ST_M25PE80:
++	case FLASH_5720VENDOR_M_ST_M45PE80:
++	case FLASH_5720VENDOR_A_ST_M25PE80:
++	case FLASH_5720VENDOR_A_ST_M45PE80:
++	case FLASH_5720VENDOR_ST_25USPT:
++	case FLASH_5720VENDOR_ST_45USPT:
++		tp->nvram_jedecnum = JEDEC_ST;
++		tp->tg3_flags |= TG3_FLAG_NVRAM_BUFFERED;
++		tp->tg3_flags2 |= TG3_FLG2_FLASH;
++
++		switch (nvmpinstrp) {
++		case FLASH_5720VENDOR_M_ST_M25PE20:
++		case FLASH_5720VENDOR_M_ST_M45PE20:
++		case FLASH_5720VENDOR_A_ST_M25PE20:
++		case FLASH_5720VENDOR_A_ST_M45PE20:
++			tp->nvram_size = TG3_NVRAM_SIZE_256KB;
++			break;
++		case FLASH_5720VENDOR_M_ST_M25PE40:
++		case FLASH_5720VENDOR_M_ST_M45PE40:
++		case FLASH_5720VENDOR_A_ST_M25PE40:
++		case FLASH_5720VENDOR_A_ST_M45PE40:
++			tp->nvram_size = TG3_NVRAM_SIZE_512KB;
++			break;
++		case FLASH_5720VENDOR_M_ST_M25PE80:
++		case FLASH_5720VENDOR_M_ST_M45PE80:
++		case FLASH_5720VENDOR_A_ST_M25PE80:
++		case FLASH_5720VENDOR_A_ST_M45PE80:
++			tp->nvram_size = TG3_NVRAM_SIZE_1MB;
++			break;
++		default:
++			tp->nvram_size = TG3_NVRAM_SIZE_128KB;
++			break;
++		}
++		break;
++	default:
++		tp->tg3_flags3 |= TG3_FLG3_NO_NVRAM;
++		return;
++	}
++
++	tg3_nvram_get_pagesize(tp, nvcfg1);
++	if (tp->nvram_pagesize != 264 && tp->nvram_pagesize != 528)
++		tp->tg3_flags3 |= TG3_FLG3_NO_NVRAM_ADDR_TRANS;
++}
++
+ /* Chips other than 5700/5701 use the NVRAM for fetching info. */
+ static void __devinit tg3_nvram_init(struct tg3 *tp)
+ {
+@@ -11880,6 +12022,8 @@
+ 		else if (GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5717 ||
+ 			 GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5719)
+ 			tg3_get_5717_nvram_info(tp);
++		else if (GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5720)
++			tg3_get_5720_nvram_info(tp);
+ 		else
+ 			tg3_get_nvram_info(tp);
+ 
+@@ -12417,7 +12561,7 @@
+ 		if (cfg2 & (1 << 18))
+ 			tp->phy_flags |= TG3_PHYFLG_SERDES_PREEMPHASIS;
+ 
+-		if (((tp->tg3_flags3 & TG3_FLG3_5717_PLUS) ||
++		if (((tp->tg3_flags3 & TG3_FLG3_57765_PLUS) ||
+ 		    ((GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5784 &&
+ 		      GET_CHIP_REV(tp->pci_chip_rev_id) != CHIPREV_5784_AX))) &&
+ 		    (cfg2 & NIC_SRAM_DATA_CFG_2_APD_EN))
+@@ -12425,7 +12569,7 @@
+ 
+ 		if ((tp->tg3_flags2 & TG3_FLG2_PCI_EXPRESS) &&
+ 		    GET_ASIC_REV(tp->pci_chip_rev_id) != ASIC_REV_5785 &&
+-		    !(tp->tg3_flags3 & TG3_FLG3_5717_PLUS)) {
++		    !(tp->tg3_flags3 & TG3_FLG3_57765_PLUS)) {
+ 			u32 cfg3;
+ 
+ 			tg3_read_mem(tp, NIC_SRAM_DATA_CFG_3, &cfg3);
+@@ -13029,14 +13173,13 @@
+ 
+ static inline u32 tg3_rx_ret_ring_size(struct tg3 *tp)
+ {
+-	if (GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5717 ||
+-	    GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5719)
+-		return 4096;
++	if (tp->tg3_flags3 & TG3_FLG3_LRG_PROD_RING_CAP)
++		return TG3_RX_RET_MAX_SIZE_5717;
+ 	else if ((tp->tg3_flags & TG3_FLAG_JUMBO_CAPABLE) &&
+ 		 !(tp->tg3_flags2 & TG3_FLG2_5780_CLASS))
+-		return 1024;
++		return TG3_RX_RET_MAX_SIZE_5700;
+ 	else
+-		return 512;
++		return TG3_RX_RET_MAX_SIZE_5705;
+ }
+ 
+ static int __devinit tg3_get_invariants(struct tg3 *tp)
+@@ -13084,6 +13227,7 @@
+ 		if (tp->pdev->device == TG3PCI_DEVICE_TIGON3_5717 ||
+ 		    tp->pdev->device == TG3PCI_DEVICE_TIGON3_5718 ||
+ 		    tp->pdev->device == TG3PCI_DEVICE_TIGON3_5724 ||
++		    tp->pdev->device == TG3PCI_DEVICE_TIGON3_5719 ||
+ 		    tp->pdev->device == TG3PCI_DEVICE_TIGON3_5719)
+ 			pci_read_config_dword(tp->pdev,
+ 					      TG3PCI_GEN2_PRODID_ASICREV,
+@@ -13239,14 +13383,19 @@
+ 
+ 	if (GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5704 ||
+ 	    GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5714 ||
+-	    GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5717)
++	    GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5717 ||
++	    GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5720)
+ 		tp->pdev_peer = tg3_find_peer(tp);
+ 
+ 	if (GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5717 ||
+ 	    GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5719 ||
+-	    GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_57765)
++	    GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5720)
+ 		tp->tg3_flags3 |= TG3_FLG3_5717_PLUS;
+ 
++	if (GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_57765 ||
++	    (tp->tg3_flags3 & TG3_FLG3_5717_PLUS))
++		tp->tg3_flags3 |= TG3_FLG3_57765_PLUS;
++
+ 	/* Intentionally exclude ASIC_REV_5906 */
+ 	if (GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5755 ||
+ 	    GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5787 ||
+@@ -13254,7 +13403,7 @@
+ 	    GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5761 ||
+ 	    GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5785 ||
+ 	    GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_57780 ||
+-	    (tp->tg3_flags3 & TG3_FLG3_5717_PLUS))
++	    (tp->tg3_flags3 & TG3_FLG3_57765_PLUS))
+ 		tp->tg3_flags3 |= TG3_FLG3_5755_PLUS;
+ 
+ 	if (GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5750 ||
+@@ -13284,7 +13433,7 @@
+ 	}
+ 
+ 	/* Determine TSO capabilities */
+-	if (tp->tg3_flags3 & TG3_FLG3_5717_PLUS)
++	if (tp->tg3_flags3 & TG3_FLG3_57765_PLUS)
+ 		tp->tg3_flags2 |= TG3_FLG2_HW_TSO_3;
+ 	else if ((tp->tg3_flags3 & TG3_FLG3_5755_PLUS) ||
+ 		 GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5906)
+@@ -13320,7 +13469,7 @@
+ 			tp->tg3_flags2 |= TG3_FLG2_1SHOT_MSI;
+ 		}
+ 
+-		if (tp->tg3_flags3 & TG3_FLG3_5717_PLUS) {
++		if (tp->tg3_flags3 & TG3_FLG3_57765_PLUS) {
+ 			tp->tg3_flags |= TG3_FLAG_SUPPORT_MSIX;
+ 			tp->irq_max = TG3_IRQ_MAX_VECS;
+ 		}
+@@ -13336,6 +13485,9 @@
+ 	}
+ 
+ 	if (tp->tg3_flags3 & TG3_FLG3_5717_PLUS)
++ 		tp->tg3_flags3 |= TG3_FLG3_LRG_PROD_RING_CAP;
++
++	if (tp->tg3_flags3 & TG3_FLG3_57765_PLUS)
+ 		tp->tg3_flags3 |= TG3_FLG3_USE_JUMBO_BDFLAG;
+ 
+ 	if (!(tp->tg3_flags2 & TG3_FLG2_5705_PLUS) ||
+@@ -13353,7 +13505,8 @@
+ 		tp->tg3_flags2 |= TG3_FLG2_PCI_EXPRESS;
+ 
+ 		tp->pcie_readrq = 4096;
+-		if (GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5719) {
++		if (GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5719 ||
++		    GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5720) {
+ 			u16 word;
+ 
+ 			pci_read_config_word(tp->pdev,
+@@ -13574,7 +13727,7 @@
+ 	    GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5761 ||
+ 	    GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5785 ||
+ 	    GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_57780 ||
+-	    (tp->tg3_flags3 & TG3_FLG3_5717_PLUS))
++	    (tp->tg3_flags3 & TG3_FLG3_57765_PLUS))
+ 		tp->tg3_flags |= TG3_FLAG_CPMU_PRESENT;
+ 
+ 	/* Set up tp->grc_local_ctrl before calling tg3_set_power_state().
+@@ -13653,7 +13806,7 @@
+ 	    !(tp->phy_flags & TG3_PHYFLG_IS_FET) &&
+ 	    GET_ASIC_REV(tp->pci_chip_rev_id) != ASIC_REV_5785 &&
+ 	    GET_ASIC_REV(tp->pci_chip_rev_id) != ASIC_REV_57780 &&
+-	    !(tp->tg3_flags3 & TG3_FLG3_5717_PLUS)) {
++	    !(tp->tg3_flags3 & TG3_FLG3_57765_PLUS)) {
+ 		if (GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5755 ||
+ 		    GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5787 ||
+ 		    GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5784 ||
+@@ -13694,7 +13847,15 @@
+ 
+ 	/* Initialize data/descriptor byte/word swapping. */
+ 	val = tr32(GRC_MODE);
++	if (GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5720)
++		val &= (GRC_MODE_BYTE_SWAP_B2HRX_DATA |
++			GRC_MODE_WORD_SWAP_B2HRX_DATA |
++			GRC_MODE_B2HRX_ENABLE |
++			GRC_MODE_HTX2B_ENABLE |
++			GRC_MODE_HOST_STACKUP);
++	else
+ 	val &= GRC_MODE_HOST_STACKUP;
++
+ 	tw32(GRC_MODE, val | tp->grc_mode);
+ 
+ 	tg3_switch_clocks(tp);
+@@ -13900,8 +14061,7 @@
+ 			tw32_f(NVRAM_CMD, NVRAM_CMD_RESET);
+ 		else
+ 			tg3_nvram_unlock(tp);
+-	} else if (GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5717 ||
+-		   GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5719) {
++	} else if (tp->tg3_flags3 & TG3_FLG3_5717_PLUS) {
+ 		if (PCI_FUNC(tp->pdev->devfn) & 1)
+ 			mac_offset = 0xcc;
+ 		if (PCI_FUNC(tp->pdev->devfn) > 1)
+@@ -13990,7 +14150,7 @@
+ #endif
+ #endif
+ 
+-	if (tp->tg3_flags3 & TG3_FLG3_5717_PLUS) {
++	if (tp->tg3_flags3 & TG3_FLG3_57765_PLUS) {
+ 		val = goal ? 0 : DMA_RWCTRL_DIS_CACHE_ALIGNMENT;
+ 		goto out;
+ 	}
+@@ -14201,7 +14361,7 @@
+ 
+ 	tp->dma_rwctrl = tg3_calc_dma_bndry(tp, tp->dma_rwctrl);
+ 
+-	if (tp->tg3_flags3 & TG3_FLG3_5717_PLUS)
++	if (tp->tg3_flags3 & TG3_FLG3_57765_PLUS)
+ 		goto out;
+ 
+ 	if (tp->tg3_flags2 & TG3_FLG2_PCI_EXPRESS) {
+@@ -14398,7 +14558,7 @@
+ 
+ static void __devinit tg3_init_bufmgr_config(struct tg3 *tp)
+ {
+-	if (tp->tg3_flags3 & TG3_FLG3_5717_PLUS) {
++	if (tp->tg3_flags3 & TG3_FLG3_57765_PLUS) {
+ 		tp->bufmgr_config.mbuf_read_dma_low_water =
+ 			DEFAULT_MB_RDMA_LOW_WATER_5705;
+ 		tp->bufmgr_config.mbuf_mac_rx_low_water =
+@@ -14476,6 +14636,7 @@
+ 	case TG3_PHY_ID_BCM5718S:	return "5718S";
+ 	case TG3_PHY_ID_BCM57765:	return "57765";
+ 	case TG3_PHY_ID_BCM5719C:	return "5719C";
++	case TG3_PHY_ID_BCM5720C:	return "5720C";
+ 	case TG3_PHY_ID_BCM8002:	return "8002/serdes";
+ 	case 0:			return "serdes";
+ 	default:		return "unknown";
+@@ -14724,8 +14885,7 @@
+ 	}
+ 
+ 	if ((tp->tg3_flags3 & TG3_FLG3_5755_PLUS) &&
+-	    GET_ASIC_REV(tp->pci_chip_rev_id) != ASIC_REV_5717 &&
+-	    GET_ASIC_REV(tp->pci_chip_rev_id) != ASIC_REV_5719)
++	    !(tp->tg3_flags3 & TG3_FLG3_5717_PLUS))
+ 		dev->netdev_ops = &tg3_netdev_ops;
+ 	else
+ 		dev->netdev_ops = &tg3_netdev_ops_dma_bug;
+diff -Nurb linux-2.6.32-27.planetlab.i686/drivers/net/tg3.h ../kernel-2.6/linux-2.6.32-27.planetlab.i686/drivers/net/tg3.h
+--- linux-2.6.32-27.planetlab.i686/drivers/net/tg3.h	2011-05-10 14:38:09.000000000 -0400
++++ ../kernel-2.6/linux-2.6.32-27.planetlab.i686/drivers/net/tg3.h	2012-05-01 09:39:43.237312425 -0400
+@@ -25,9 +25,13 @@
+ 
+ #define TG3_RX_INTERNAL_RING_SZ_5906	32
+ 
+-#define RX_STD_MAX_SIZE_5705		512
+-#define RX_STD_MAX_SIZE_5717		2048
+-#define RX_JUMBO_MAX_SIZE		0xdeadbeef /* XXX */
++#define TG3_RX_STD_MAX_SIZE_5700	512
++#define TG3_RX_STD_MAX_SIZE_5717	2048
++#define TG3_RX_JMB_MAX_SIZE_5700	256
++#define TG3_RX_JMB_MAX_SIZE_5717	1024
++#define TG3_RX_RET_MAX_SIZE_5700	1024
++#define TG3_RX_RET_MAX_SIZE_5705	512
++#define TG3_RX_RET_MAX_SIZE_5717	4096
+ 
+ /* First 256 bytes are a mirror of PCI config space. */
+ #define TG3PCI_VENDOR			0x00000000
+@@ -55,6 +59,7 @@
+ #define  TG3PCI_DEVICE_TIGON3_57791	 0x16b2
+ #define  TG3PCI_DEVICE_TIGON3_57795	 0x16b6
+ #define  TG3PCI_DEVICE_TIGON3_5719	 0x1657
++#define  TG3PCI_DEVICE_TIGON3_5720	 0x165f
+ /* 0x04 --> 0x2c unused */
+ #define TG3PCI_SUBVENDOR_ID_BROADCOM		PCI_VENDOR_ID_BROADCOM
+ #define TG3PCI_SUBDEVICE_ID_BROADCOM_95700A6	0x1644
+@@ -163,6 +168,7 @@
+ #define   ASIC_REV_5717			 0x5717
+ #define   ASIC_REV_57765		 0x57785
+ #define   ASIC_REV_5719			 0x5719
++#define   ASIC_REV_5720			 0x5720
+ #define  GET_CHIP_REV(CHIP_REV_ID)	((CHIP_REV_ID) >> 8)
+ #define   CHIPREV_5700_AX		 0x70
+ #define   CHIPREV_5700_BX		 0x71
+@@ -473,6 +479,8 @@
+ #define  TX_MODE_BIG_BCKOFF_ENABLE	 0x00000020
+ #define  TX_MODE_LONG_PAUSE_ENABLE	 0x00000040
+ #define  TX_MODE_MBUF_LOCKUP_FIX	 0x00000100
++#define  TX_MODE_JMB_FRM_LEN		 0x00400000
++#define  TX_MODE_CNT_DN_MODE		 0x00800000
+ #define MAC_TX_STATUS			0x00000460
+ #define  TX_STATUS_XOFFED		 0x00000001
+ #define  TX_STATUS_SENT_XOFF		 0x00000002
+@@ -487,6 +495,8 @@
+ #define  TX_LENGTHS_IPG_SHIFT		 8
+ #define  TX_LENGTHS_IPG_CRS_MASK	 0x00003000
+ #define  TX_LENGTHS_IPG_CRS_SHIFT	 12
++#define  TX_LENGTHS_JMB_FRM_LEN_MSK	 0x00ff0000
++#define  TX_LENGTHS_CNT_DWN_VAL_MSK	 0xff000000
+ #define MAC_RX_MODE			0x00000468
+ #define  RX_MODE_RESET			 0x00000001
+ #define  RX_MODE_ENABLE			 0x00000002
+@@ -1079,6 +1089,9 @@
+ #define  CPMU_HST_ACC_MACCLK_6_25	 0x00130000
+ /* 0x3620 --> 0x3630 unused */
+ 
++#define TG3_CPMU_CLCK_ORIDE		0x00003624
++#define  CPMU_CLCK_ORIDE_MAC_ORIDE_EN	 0x80000000
++
+ #define TG3_CPMU_CLCK_STAT		0x00003630
+ #define  CPMU_CLCK_STAT_MAC_CLCK_MASK	 0x001f0000
+ #define  CPMU_CLCK_STAT_MAC_CLCK_62_5	 0x00000000
+@@ -1321,6 +1334,7 @@
+ #define  RDMAC_MODE_MULT_DMA_RD_DIS	 0x01000000
+ #define  RDMAC_MODE_IPV4_LSO_EN		 0x08000000
+ #define  RDMAC_MODE_IPV6_LSO_EN		 0x10000000
++#define  RDMAC_MODE_H2BNC_VLAN_DET	 0x20000000
+ #define RDMAC_STATUS			0x00004804
+ #define  RDMAC_STATUS_TGTABORT		 0x00000004
+ #define  RDMAC_STATUS_MSTABORT		 0x00000008
+@@ -1609,6 +1623,8 @@
+ #define  GRC_MODE_WSWAP_NONFRM_DATA	0x00000004
+ #define  GRC_MODE_BSWAP_DATA		0x00000010
+ #define  GRC_MODE_WSWAP_DATA		0x00000020
++#define  GRC_MODE_BYTE_SWAP_B2HRX_DATA	0x00000040
++#define  GRC_MODE_WORD_SWAP_B2HRX_DATA	0x00000080
+ #define  GRC_MODE_SPLITHDR		0x00000100
+ #define  GRC_MODE_NOFRM_CRACKING	0x00000200
+ #define  GRC_MODE_INCL_CRC		0x00000400
+@@ -1616,8 +1632,10 @@
+ #define  GRC_MODE_NOIRQ_ON_SENDS	0x00002000
+ #define  GRC_MODE_NOIRQ_ON_RCV		0x00004000
+ #define  GRC_MODE_FORCE_PCI32BIT	0x00008000
++#define  GRC_MODE_B2HRX_ENABLE		0x00008000
+ #define  GRC_MODE_HOST_STACKUP		0x00010000
+ #define  GRC_MODE_HOST_SENDBDS		0x00020000
++#define  GRC_MODE_HTX2B_ENABLE		0x00040000
+ #define  GRC_MODE_NO_TX_PHDR_CSUM	0x00100000
+ #define  GRC_MODE_NVRAM_WR_ENABLE	0x00200000
+ #define  GRC_MODE_PCIE_TL_SEL		0x00000000
+@@ -1814,6 +1832,38 @@
+ #define  FLASH_5717VENDOR_ATMEL_45USPT	 0x03400000
+ #define  FLASH_5717VENDOR_ST_25USPT	 0x03400002
+ #define  FLASH_5717VENDOR_ST_45USPT	 0x03400001
++#define  FLASH_5720_EEPROM_HD		 0x00000001
++#define  FLASH_5720_EEPROM_LD		 0x00000003
++#define  FLASH_5720VENDOR_M_ATMEL_DB011D 0x01000000
++#define  FLASH_5720VENDOR_M_ATMEL_DB021D 0x01000002
++#define  FLASH_5720VENDOR_M_ATMEL_DB041D 0x01000001
++#define  FLASH_5720VENDOR_M_ATMEL_DB081D 0x01000003
++#define  FLASH_5720VENDOR_M_ST_M25PE10	 0x02000000
++#define  FLASH_5720VENDOR_M_ST_M25PE20	 0x02000002
++#define  FLASH_5720VENDOR_M_ST_M25PE40	 0x02000001
++#define  FLASH_5720VENDOR_M_ST_M25PE80	 0x02000003
++#define  FLASH_5720VENDOR_M_ST_M45PE10	 0x03000000
++#define  FLASH_5720VENDOR_M_ST_M45PE20	 0x03000002
++#define  FLASH_5720VENDOR_M_ST_M45PE40	 0x03000001
++#define  FLASH_5720VENDOR_M_ST_M45PE80	 0x03000003
++#define  FLASH_5720VENDOR_A_ATMEL_DB011B 0x01800000
++#define  FLASH_5720VENDOR_A_ATMEL_DB021B 0x01800002
++#define  FLASH_5720VENDOR_A_ATMEL_DB041B 0x01800001
++#define  FLASH_5720VENDOR_A_ATMEL_DB011D 0x01c00000
++#define  FLASH_5720VENDOR_A_ATMEL_DB021D 0x01c00002
++#define  FLASH_5720VENDOR_A_ATMEL_DB041D 0x01c00001
++#define  FLASH_5720VENDOR_A_ATMEL_DB081D 0x01c00003
++#define  FLASH_5720VENDOR_A_ST_M25PE10	 0x02800000
++#define  FLASH_5720VENDOR_A_ST_M25PE20	 0x02800002
++#define  FLASH_5720VENDOR_A_ST_M25PE40	 0x02800001
++#define  FLASH_5720VENDOR_A_ST_M25PE80	 0x02800003
++#define  FLASH_5720VENDOR_A_ST_M45PE10	 0x02c00000
++#define  FLASH_5720VENDOR_A_ST_M45PE20	 0x02c00002
++#define  FLASH_5720VENDOR_A_ST_M45PE40	 0x02c00001
++#define  FLASH_5720VENDOR_A_ST_M45PE80	 0x02c00003
++#define  FLASH_5720VENDOR_ATMEL_45USPT	 0x03c00000
++#define  FLASH_5720VENDOR_ST_25USPT	 0x03c00002
++#define  FLASH_5720VENDOR_ST_45USPT	 0x03c00001
+ #define  NVRAM_CFG1_5752PAGE_SIZE_MASK	 0x70000000
+ #define  FLASH_5752PAGE_SIZE_256	 0x00000000
+ #define  FLASH_5752PAGE_SIZE_512	 0x10000000
+@@ -2889,6 +2939,7 @@
+ #define TG3_FLG3_5701_DMA_BUG		0x00000008
+ #define TG3_FLG3_USE_PHYLIB		0x00000010
+ #define TG3_FLG3_MDIOBUS_INITED		0x00000020
++#define TG3_FLG3_LRG_PROD_RING_CAP	0x00000080
+ #define TG3_FLG3_RGMII_INBAND_DISABLE	0x00000100
+ #define TG3_FLG3_RGMII_EXT_IBND_RX_EN	0x00000200
+ #define TG3_FLG3_RGMII_EXT_IBND_TX_EN	0x00000400
+@@ -2902,7 +2953,8 @@
+ #define TG3_FLG3_SHORT_DMA_BUG		0x00200000
+ #define TG3_FLG3_USE_JUMBO_BDFLAG	0x00400000
+ #define TG3_FLG3_L1PLLPD_EN		0x00800000
+-#define TG3_FLG3_5717_PLUS		0x01000000
++#define TG3_FLG3_57765_PLUS		0x01000000
++#define TG3_FLG3_5717_PLUS		0x04000000
+ 
+ 	struct timer_list		timer;
+ 	u16				timer_counter;
+@@ -2974,6 +3026,7 @@
+ #define TG3_PHY_ID_BCM5718S		0xbc050ff0
+ #define TG3_PHY_ID_BCM57765		0x5c0d8a40
+ #define TG3_PHY_ID_BCM5719C		0x5c0d8a20
++#define TG3_PHY_ID_BCM5720C		0x5c0d8b60
+ #define TG3_PHY_ID_BCM5906		0xdc00ac40
+ #define TG3_PHY_ID_BCM8002		0x60010140
+ #define TG3_PHY_ID_INVALID		0xffffffff
+@@ -3040,6 +3093,7 @@
+ 
+ 	int				nvram_lock_cnt;
+ 	u32				nvram_size;
++#define TG3_NVRAM_SIZE_2KB		0x00000800
+ #define TG3_NVRAM_SIZE_64KB		0x00010000
+ #define TG3_NVRAM_SIZE_128KB		0x00020000
+ #define TG3_NVRAM_SIZE_256KB		0x00040000
+@@ -3055,6 +3109,9 @@
+ #define JEDEC_SAIFUN			0x4f
+ #define JEDEC_SST			0xbf
+ 
++#define ATMEL_AT24C02_CHIP_SIZE		TG3_NVRAM_SIZE_2KB
++#define ATMEL_AT24C02_PAGE_SIZE		(8)
++
+ #define ATMEL_AT24C64_CHIP_SIZE		TG3_NVRAM_SIZE_64KB
+ #define ATMEL_AT24C64_PAGE_SIZE		(32)
+ 
