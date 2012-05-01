@@ -62,7 +62,7 @@ diff -Nurb linux-2.6.32-27.planetlab.i686/drivers/net/tg3.c ../kernel-2.6/linux-
  
  	if (GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5704 ||
  	    GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5714 ||
--	    GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5717) {
+-	    GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5717 {
 +	    GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5717) || 
 +            GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5720))
  		struct net_device *dev_peer;
