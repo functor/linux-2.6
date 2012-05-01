@@ -10,7 +10,7 @@ URL: %{SCMURL}
 
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 28
+%define taglevel 29
 
 %define sublevel 32
 
@@ -1795,6 +1795,9 @@ fi
 %endif
 
 %changelog
+* Tue May 01 2012 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-32-29
+- Renamed the latest patch file to something build doesn't reject.
+
 * Tue May 01 2012 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-32-28
 - This patch adds a backported version of a patchset to support the bcm5720 chipset, used by various PlanetLab and MLab
 - members.
