@@ -661,7 +661,7 @@ Source81: config-i686-debug-rhel
 Source82: config-generic
 Source83: config-x86_64-debug-rhel
 
-Patch0: bcm5720.diff
+Patch0: linux-2.6-001-bcm5720.patch
 Patch1: patch-2.6.32-131.0.15.el6-vs2.3.0.36.29.6.diff
 Patch2: linux-2.6-255-vserver-delta-cow-fix23.patch
 Patch3: linux-2.6-250-ipsets.patch
@@ -980,7 +980,7 @@ cp %{SOURCE15} %{SOURCE1} %{SOURCE16} %{SOURCE17} %{SOURCE18} .
 make -f %{SOURCE20} VERSION=%{version} configs
 
 #### Planet-Lab ####
-ApplyPatch bcm5720.diff
+ApplyPatch linux-2.6-001-bcm5720.patch
 ApplyPatch patch-2.6.32-131.0.15.el6-vs2.3.0.36.29.6.diff
 ApplyPatch linux-2.6-255-vserver-delta-cow-fix23.patch
 ApplyPatch linux-2.6-250-ipsets.patch
