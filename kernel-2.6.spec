@@ -10,7 +10,7 @@ URL: %{SCMURL}
 
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 29
+%define taglevel 30
 
 %define sublevel 32
 
@@ -1795,6 +1795,9 @@ fi
 %endif
 
 %changelog
+* Tue May 01 2012 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-32-30
+- Fixed a compile error.
+
 * Tue May 01 2012 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-32-29
 - Renamed the latest patch file to something build doesn't reject.
 
