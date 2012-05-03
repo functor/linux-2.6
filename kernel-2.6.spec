@@ -10,7 +10,7 @@ URL: %{SCMURL}
 
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 31
+%define taglevel 32
 
 %define sublevel 32
 
@@ -1795,6 +1795,9 @@ fi
 %endif
 
 %changelog
+* Thu May 03 2012 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-32-32
+- Fixed some parantheses.
+
 * Thu May 03 2012 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-32-31
 - For some reason the -30 tag did not get created in Linux-2.6. Might be because of a temporary problem with the git
 - server.
