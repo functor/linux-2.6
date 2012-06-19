@@ -10,7 +10,7 @@ URL: %{SCMURL}
 
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 27
+%define taglevel 888
 
 %define sublevel 32
 
