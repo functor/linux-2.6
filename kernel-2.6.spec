@@ -682,6 +682,7 @@ Patch18: linux-2.6-650-hangcheck-reboot.patch
 Patch19: linux-2.6-660-nmi-watchdog-default.patch
 Patch20: linux-2.6-680-htb-hysteresis-tso.patch
 Patch21: linux-2.6-690-web100.patch
+Patch22: linux-2.6-700-bcm5720.patch
 
 Patch10000: linux-2.6-10000-gcc-4.5.patch
 Patch10001: linux-2.6-10001-gcc-4.6-warnoff.patch
@@ -1002,6 +1003,7 @@ ApplyPatch linux-2.6-650-hangcheck-reboot.patch
 ApplyPatch linux-2.6-660-nmi-watchdog-default.patch
 ApplyPatch linux-2.6-680-htb-hysteresis-tso.patch
 ApplyPatch linux-2.6-690-web100.patch
+ApplyPatch linux-2.6-700-bcm5720.patch
 ApplyPatch linux-2.6-10000-gcc-4.5.patch
 ApplyPatch linux-2.6-10001-gcc-4.6-warnoff.patch
 ApplyPatch linux-2.6-10002-gcc-4.6-sense_buffer.patch
