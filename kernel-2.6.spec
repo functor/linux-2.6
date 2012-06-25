@@ -10,8 +10,8 @@ URL: %{SCMURL}
 
 %define name linux-2.6
 %define module_version_varname sublevel
-# 131 borrowed from centos6.1, -2 second mlab revision
-%define taglevel 131-2
+# 131 borrowed from centos6.1, tg3 from 220 centos 6.2
+%define taglevel 131.tg3.220
 
 %define sublevel 32
 
