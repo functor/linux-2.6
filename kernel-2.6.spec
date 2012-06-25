@@ -10,7 +10,8 @@ URL: %{SCMURL}
 
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 888
+# 131 borrowed from centos6.1, -2 second mlab revision
+%define taglevel 131-2
 
 %define sublevel 32
 
@@ -232,7 +233,9 @@ Summary: The Linux kernel
 %define pkg_release %{distro_build}%{?dist}%{?buildid}
 %endif
 #### Planet-Lab ####
-%define pkg_release %{taglevel}%{?pldistro:.%{pldistro}}.mlab%{?date:.%{date}}
+#%define pkg_release %{taglevel}%{?pldistro:.%{pldistro}}.mlab%{?date:.%{date}}
+# this branch is now unique to the mlab build. so pldistro==mlab
+%define pkg_release %{taglevel}%{?pldistro:.%{pldistro}}%{?date:.%{date}}
 #### Planet-Lab ####
 %define KVERREL %{rpmversion}-%{pkg_release}.%{_target_cpu}
 
