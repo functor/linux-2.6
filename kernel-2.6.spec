@@ -10,7 +10,7 @@ URL: %{SCMURL}
 
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 34
+%define taglevel 35
 
 %define sublevel 32
 
@@ -1793,6 +1793,8 @@ fi
 %endif
 
 %changelog
+* Wed Aug 29 2012 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-32-35
+
 * Wed Aug 29 2012 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-32-34
 
 * Thu May 03 2012 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-32-33
