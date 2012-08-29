@@ -1,0 +1,13 @@
+diff -up linux-2.6.32-33.planetlab.x86_64/kernel/sched.c.orig linux-2.6.32-33.planetlab.x86_64/kernel/sched.c
+--- linux-2.6.32-33.planetlab.x86_64/kernel/sched.c.orig	2012-08-29 05:08:16.000000000 -0400
++++ linux-2.6.32-33.planetlab.x86_64/kernel/sched.c	2012-08-29 05:25:03.150631094 -0400
+@@ -4058,6 +4058,9 @@ static void update_group_power(struct sc
+ 		group = group->next;
+ 	} while (group != child->groups);
+ 
++    if (!power)
++		power = 1;
++
+ 	sdg->cpu_power = power;
+ }
+ 

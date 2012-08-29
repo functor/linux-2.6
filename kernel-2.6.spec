@@ -14,11 +14,7 @@ URL: %{SCMURL}
 
 %define sublevel 32
 
-%if ("%{distro}" == "Fedora" && %{distrorelease} >= 12) || ("%{distro}" == "SL" && %{distrorelease} >= 6) || ("%{distro}" == "CentOS" && %{distrorelease} >= 6)
 %define modern_distro 1
-%else
-%define modern_distro 0
-%endif
 #### Planet-Lab ####
 
 Summary: The Linux kernel
@@ -981,6 +977,7 @@ make -f %{SOURCE20} VERSION=%{version} configs
 
 #### Planet-Lab ####
 ApplyPatch linux-2.6-001-bcm5720.patch
+ApplyPatch linux-2.6-002-divide-by-zero-fix.patch
 ApplyPatch patch-2.6.32-131.0.15.el6-vs2.3.0.36.29.6.diff
 ApplyPatch linux-2.6-255-vserver-delta-cow-fix23.patch
 ApplyPatch linux-2.6-250-ipsets.patch
