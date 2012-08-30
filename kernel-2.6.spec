@@ -658,7 +658,7 @@ Source82: config-generic
 Source83: config-x86_64-debug-rhel
 
 Patch0: linux-2.6-001-bcm5720.patch
-Patch20001: linux-2.6-002-divide-by-zero-fix.diff
+Patch20001: linux-2.6-002-divide-by-zero-fix.patch
 Patch1: patch-2.6.32-131.0.15.el6-vs2.3.0.36.29.6.diff
 Patch2: linux-2.6-255-vserver-delta-cow-fix23.patch
 Patch3: linux-2.6-250-ipsets.patch
