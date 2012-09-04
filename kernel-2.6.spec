@@ -10,7 +10,7 @@ URL: %{SCMURL}
 
 %define name linux-2.6
 %define module_version_varname sublevel
-%define taglevel 35
+%define taglevel 36
 
 %define sublevel 32
 
@@ -1793,6 +1793,9 @@ fi
 %endif
 
 %changelog
+* Tue Sep 04 2012 Thierry Parmentelat <thierry.parmentelat@sophia.inria.fr> - linux-2.6-32-36
+- fix filename in specfile - 2.6-35 was broken
+
 * Wed Aug 29 2012 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-32-35
 
 * Wed Aug 29 2012 Sapan Bhatia <sapanb@cs.princeton.edu> - linux-2.6-32-34
