@@ -1,0 +1,208 @@
+diff -Ndur linux-2.6.32-700/include/net/tcp.h linux-2.6.32-700-xidmask/include/net/tcp.h
+--- linux-2.6.32-700/include/net/tcp.h	2013-01-10 14:18:49.880337393 -0500
++++ linux-2.6.32-700-xidmask/include/net/tcp.h	2013-01-10 14:21:16.366337329 -0500
+@@ -251,6 +251,8 @@
+ #ifdef CONFIG_WEB100_STATS
+ extern int sysctl_web100_fperms;
+ extern int sysctl_web100_gid;
++extern int sysctl_web100_sidestream_xid;
++extern int sysctl_web100_mask_xid;
+ #endif
+ 
+ extern atomic_t tcp_memory_allocated;
+diff -Ndur linux-2.6.32-700/Makefile linux-2.6.32-700-xidmask/Makefile
+--- linux-2.6.32-700/Makefile	2013-01-10 14:18:52.816337505 -0500
++++ linux-2.6.32-700-xidmask/Makefile	2013-01-10 14:38:46.659197193 -0500
+@@ -1,7 +1,7 @@
+ VERSION = 2
+ PATCHLEVEL = 6
+ SUBLEVEL = 32
+-EXTRAVERSION = -131.tg3.220.mlab.i686
++EXTRAVERSION = .133-vs2.3.0.36.29.6.mlab.mask1.planetlab
+ NAME = Man-Eating Seals of Antiquity
+ RHEL_MAJOR = 6
+ RHEL_MINOR = 1
+diff -Ndur linux-2.6.32-700/net/ipv4/sysctl_net_ipv4.c linux-2.6.32-700-xidmask/net/ipv4/sysctl_net_ipv4.c
+--- linux-2.6.32-700/net/ipv4/sysctl_net_ipv4.c	2013-01-10 14:18:50.233320698 -0500
++++ linux-2.6.32-700-xidmask/net/ipv4/sysctl_net_ipv4.c	2013-01-10 14:30:18.997403751 -0500
+@@ -754,6 +754,22 @@
+ 		.mode		= 0644,
+ 		.proc_handler	= &web100_proc_dointvec_update,
+ 	},
++	{
++		.ctl_name	= CTL_UNNUMBERED,
++		.procname	= "web100_sidestream_xid",
++		.data		= &sysctl_web100_sidestream_xid,
++		.maxlen		= sizeof(int),
++		.mode		= 0644,
++		.proc_handler	= &web100_proc_dointvec_update,
++	},
++	{
++		.ctl_name	= CTL_UNNUMBERED,
++		.procname	= "web100_mask_xid",
++		.data		= &sysctl_web100_mask_xid,
++		.maxlen		= sizeof(int),
++		.mode		= 0644,
++		.proc_handler	= &web100_proc_dointvec_update,
++	},
+ #endif
+ 	{
+ 		.ctl_name	= CTL_UNNUMBERED,
+diff -Ndur linux-2.6.32-700/net/ipv4/tcp.c linux-2.6.32-700-xidmask/net/ipv4/tcp.c
+--- linux-2.6.32-700/net/ipv4/tcp.c	2013-01-10 14:18:50.234322447 -0500
++++ linux-2.6.32-700-xidmask/net/ipv4/tcp.c	2013-01-10 14:21:16.368337586 -0500
+@@ -297,6 +297,8 @@
+ #ifdef CONFIG_WEB100_STATS
+ int sysctl_web100_fperms = CONFIG_WEB100_FPERMS;
+ int sysctl_web100_gid = CONFIG_WEB100_GID;
++int sysctl_web100_sidestream_xid = 0;
++int sysctl_web100_mask_xid = -1;
+ #endif
+ 
+ atomic_t tcp_memory_allocated;	/* Current allocated memory. */
+@@ -848,7 +850,7 @@
+ 		if (copied) {
+ 			tcp_push(sk, flags & ~MSG_MORE, mss_now, TCP_NAGLE_PUSH);
+ #ifdef CONFIG_WEB100_STATS
+-			web100_update_writeq(sk);
++			WEB100_UPDATE_FUNC(tcp_sk(sk), web100_update_writeq(sk));
+ #endif
+ 		}
+ 
+@@ -1101,7 +1103,7 @@
+ 			if (copied) {
+ 				tcp_push(sk, flags & ~MSG_MORE, mss_now, TCP_NAGLE_PUSH);
+ #ifdef CONFIG_WEB100_STATS
+-				web100_update_writeq(sk);
++				WEB100_UPDATE_FUNC(tcp_sk(sk), web100_update_writeq(sk));
+ #endif
+ 			}
+ 
+@@ -1471,7 +1473,7 @@
+ 					tp->rcv_nxt, flags);
+ 		}
+ #ifdef CONFIG_WEB100_STATS
+-		web100_update_recvq(sk);
++		WEB100_UPDATE_FUNC(tcp_sk(sk), web100_update_recvq(sk));
+ #endif
+ 
+ 		/* Well, if we have backlog, try to process it now yet. */
+diff -Ndur linux-2.6.32-700/net/ipv4/tcp_input.c linux-2.6.32-700-xidmask/net/ipv4/tcp_input.c
+--- linux-2.6.32-700/net/ipv4/tcp_input.c	2013-01-10 14:18:50.232318345 -0500
++++ linux-2.6.32-700-xidmask/net/ipv4/tcp_input.c	2013-01-10 14:21:16.371337187 -0500
+@@ -3177,7 +3177,7 @@
+ 	}
+ 	
+ #ifdef CONFIG_WEB100_NET100
+-	if (vars->WAD_NoAI) {
++	if (stats != NULL && vars->WAD_NoAI) {
+ 		tp->snd_cwnd += vars->WAD_CwndAdjust;
+ 		vars->WAD_CwndAdjust = 0;
+ 		tp->snd_cwnd_stamp = tcp_time_stamp;
+@@ -4426,7 +4426,7 @@
+ 		tcp_fast_path_check(sk);
+ 
+ #ifdef CONFIG_WEB100_STATS
+-		web100_update_recvq(sk);
++		WEB100_UPDATE_FUNC(tcp_sk(sk), web100_update_recvq(sk));
+ #endif
+ 
+ 		if (eaten > 0)
+@@ -4484,7 +4484,7 @@
+ 		   tp->rcv_nxt, TCP_SKB_CB(skb)->seq, TCP_SKB_CB(skb)->end_seq);
+ 
+ #ifdef CONFIG_WEB100_STATS
+-	web100_update_recvq(sk);
++	WEB100_UPDATE_FUNC(tcp_sk(sk), web100_update_recvq(sk));
+ #endif
+ 	skb_set_owner_r(skb, sk);
+ 
+@@ -5372,7 +5372,7 @@
+ 			}
+ 
+ #ifdef CONFIG_WEB100_STATS
+-			web100_update_recvq(sk);
++			WEB100_UPDATE_FUNC(tcp_sk(sk), web100_update_recvq(sk));
+ #endif
+ 			tcp_event_data_recv(sk, skb);
+ 
+diff -Ndur linux-2.6.32-700/net/ipv4/tcp_ipv4.c linux-2.6.32-700-xidmask/net/ipv4/tcp_ipv4.c
+--- linux-2.6.32-700/net/ipv4/tcp_ipv4.c	2013-01-10 14:18:50.235319018 -0500
++++ linux-2.6.32-700-xidmask/net/ipv4/tcp_ipv4.c	2013-01-10 14:21:16.372284450 -0500
+@@ -1383,7 +1383,9 @@
+ 		sk_free(newsk);
+ 		goto exit;
+ 	}
+-	tcp_sk(newsk)->tcp_stats->wc_vars.LocalAddressType = WC_ADDRTYPE_IPV4;
++	if ( tcp_sk(newsk)->tcp_stats != NULL ) {
++		tcp_sk(newsk)->tcp_stats->wc_vars.LocalAddressType = WC_ADDRTYPE_IPV4;
++	}
+ #endif
+ 
+ 	newsk->sk_gso_type = SKB_GSO_TCPV4;
+@@ -1857,7 +1859,9 @@
+ 		if ((err = web100_stats_create(sk))) {
+ 			return err;
+ 		}
+-		tcp_sk(sk)->tcp_stats->wc_vars.LocalAddressType = WC_ADDRTYPE_IPV4;
++		if ( tcp_sk(sk)->tcp_stats != NULL ) {
++			tcp_sk(sk)->tcp_stats->wc_vars.LocalAddressType = WC_ADDRTYPE_IPV4;
++		}
+ 	}
+ #endif
+ 
+diff -Ndur linux-2.6.32-700/net/ipv4/web100_stats.c linux-2.6.32-700-xidmask/net/ipv4/web100_stats.c
+--- linux-2.6.32-700/net/ipv4/web100_stats.c	2013-01-10 14:18:50.231318735 -0500
++++ linux-2.6.32-700-xidmask/net/ipv4/web100_stats.c	2013-01-10 14:21:16.373337472 -0500
+@@ -252,6 +252,16 @@
+ 	struct web100directs *vars;
+ 	struct tcp_sock *tp = tcp_sk(sk);
+ 	struct timeval tv;
++
++	printk("Web100: stats_create(): checking xid(%d) mask(%d)\n",
++				sk->sk_xid, sysctl_web100_mask_xid);
++	if ( sk->sk_xid == sysctl_web100_mask_xid ) {
++		/* this xid is masked, so do not allocate or update tcp_stats */
++		printk("Web100: skipping stats_create() for xid(%d) mask(%d)\n",
++				sk->sk_xid, sysctl_web100_mask_xid);
++		tp->tcp_stats = NULL;
++		return 0;
++	}
+ 	
+ 	if ((stats = kmalloc(sizeof (struct web100stats), gfp_any())) == NULL)
+ 		return -ENOMEM;
+@@ -294,6 +304,9 @@
+ 
+ void web100_stats_destroy(struct web100stats *stats)
+ {
++    if ( stats == NULL ) {
++        return;
++    }
+ 	/* Attribute final sndlim time. */
+ 	web100_update_sndlim(tcp_sk(stats->wc_sk), stats->wc_limstate);
+ 	
+diff -Ndur linux-2.6.32-700/net/ipv6/tcp_ipv6.c linux-2.6.32-700-xidmask/net/ipv6/tcp_ipv6.c
+--- linux-2.6.32-700/net/ipv6/tcp_ipv6.c	2013-01-10 14:18:50.219284269 -0500
++++ linux-2.6.32-700-xidmask/net/ipv6/tcp_ipv6.c	2013-01-10 14:21:16.373337472 -0500
+@@ -1380,7 +1380,9 @@
+ 		sk_free(newsk);
+ 		goto out;
+ 	}
+-	tcp_sk(newsk)->tcp_stats->wc_vars.LocalAddressType = WC_ADDRTYPE_IPV6;
++	if ( tcp_sk(newsk)->tcp_stats != NULL ) {
++		tcp_sk(newsk)->tcp_stats->wc_vars.LocalAddressType = WC_ADDRTYPE_IPV6;
++	}
+ #endif
+ 
+ 	/*
+@@ -1901,7 +1903,9 @@
+ 		if ((err = web100_stats_create(sk))) {
+ 			return err;
+ 		}
+-		tcp_sk(sk)->tcp_stats->wc_vars.LocalAddressType = WC_ADDRTYPE_IPV6;
++		if ( tcp_sk(sk)->tcp_stats != NULL ) {
++			tcp_sk(sk)->tcp_stats->wc_vars.LocalAddressType = WC_ADDRTYPE_IPV6;
++		}
+ 	}
+ #endif
+ 	
