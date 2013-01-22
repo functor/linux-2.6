@@ -47,18 +47,6 @@ diff -Ndur linux-2.6.32-700/include/net/web100.h linux-2.6.32-700-xidmask/includ
  
  /* For the TCP code */
  extern int  web100_stats_create(struct sock *sk);
-diff -Ndur linux-2.6.32-700/Makefile linux-2.6.32-700-xidmask/Makefile
---- linux-2.6.32-700/Makefile	2013-01-10 14:18:52.816337505 -0500
-+++ linux-2.6.32-700-xidmask/Makefile	2013-01-19 18:08:11.786396982 -0500
-@@ -1,7 +1,7 @@
- VERSION = 2
- PATCHLEVEL = 6
- SUBLEVEL = 32
--EXTRAVERSION = -131.tg3.220.mlab.i686
-+EXTRAVERSION = .133-vs2.3.0.36.29.6.mlab.maskXX.planetlab
- NAME = Man-Eating Seals of Antiquity
- RHEL_MAJOR = 6
- RHEL_MINOR = 1
 diff -Ndur linux-2.6.32-700/net/ipv4/sysctl_net_ipv4.c linux-2.6.32-700-xidmask/net/ipv4/sysctl_net_ipv4.c
 --- linux-2.6.32-700/net/ipv4/sysctl_net_ipv4.c	2013-01-10 14:18:50.233320698 -0500
 +++ linux-2.6.32-700-xidmask/net/ipv4/sysctl_net_ipv4.c	2013-01-19 15:41:52.767269242 -0500
