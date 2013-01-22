@@ -1,19 +1,68 @@
+diff -Ndur linux-2.6.32-700/fs/proc/web100.c linux-2.6.32-700-xidmask/fs/proc/web100.c
+--- linux-2.6.32-700/fs/proc/web100.c	2013-01-10 14:18:50.429337747 -0500
++++ linux-2.6.32-700-xidmask/fs/proc/web100.c	2013-01-19 23:39:00.433628214 -0500
+@@ -655,7 +655,8 @@
+ 	
+ 	stats = web100stats_first;
+ 	while (stats && n < max) {
+-		if (!stats->wc_dead) {
++		// only return readable stats
++		if ( 1 == vx_can_read_stats(stats) ) {
+ 			if (pos <= 0)
+ 				cids[n++] = stats->wc_cid;
+ 			else
+diff -Ndur linux-2.6.32-700/include/linux/vserver/context.h linux-2.6.32-700-xidmask/include/linux/vserver/context.h
+--- linux-2.6.32-700/include/linux/vserver/context.h	2013-01-10 14:18:49.949337361 -0500
++++ linux-2.6.32-700-xidmask/include/linux/vserver/context.h	2013-01-19 23:27:42.280655065 -0500
+@@ -79,6 +79,7 @@
+ #define VXC_KTHREAD		0x01000000
+ #define VXC_NAMESPACE		0x02000000
+ 
++#define VXC_ENABLE_WEB100	0x10000000
+ 
+ #ifdef	__KERNEL__
+ 
 diff -Ndur linux-2.6.32-700/include/net/tcp.h linux-2.6.32-700-xidmask/include/net/tcp.h
 --- linux-2.6.32-700/include/net/tcp.h	2013-01-10 14:18:49.880337393 -0500
-+++ linux-2.6.32-700-xidmask/include/net/tcp.h	2013-01-10 14:21:16.366337329 -0500
-@@ -251,6 +251,8 @@
++++ linux-2.6.32-700-xidmask/include/net/tcp.h	2013-01-19 15:41:28.218337671 -0500
+@@ -251,6 +251,7 @@
  #ifdef CONFIG_WEB100_STATS
  extern int sysctl_web100_fperms;
  extern int sysctl_web100_gid;
 +extern int sysctl_web100_sidestream_xid;
-+extern int sysctl_web100_mask_xid;
  #endif
  
  extern atomic_t tcp_memory_allocated;
+diff -Ndur linux-2.6.32-700/include/net/web100.h linux-2.6.32-700-xidmask/include/net/web100.h
+--- linux-2.6.32-700/include/net/web100.h	2013-01-10 14:18:49.874218972 -0500
++++ linux-2.6.32-700-xidmask/include/net/web100.h	2013-01-19 23:44:09.561660368 -0500
+@@ -46,7 +46,9 @@
+ extern rwlock_t web100_linkage_lock;
+ 
+ /* For /proc/web100 */
+-extern struct web100stats *web100stats_lookup(int cid);
++extern int vx_can_read_stats(struct web100stats *stats);
++extern struct web100stats *vx_web100stats_lookup(int cid, int vx_filter);
++#define web100stats_lookup(cid) vx_web100stats_lookup(cid, 1)
+ 
+ /* For the TCP code */
+ extern int  web100_stats_create(struct sock *sk);
+diff -Ndur linux-2.6.32-700/Makefile linux-2.6.32-700-xidmask/Makefile
+--- linux-2.6.32-700/Makefile	2013-01-10 14:18:52.816337505 -0500
++++ linux-2.6.32-700-xidmask/Makefile	2013-01-19 18:08:11.786396982 -0500
+@@ -1,7 +1,7 @@
+ VERSION = 2
+ PATCHLEVEL = 6
+ SUBLEVEL = 32
+-EXTRAVERSION = -131.tg3.220.mlab.i686
++EXTRAVERSION = .133-vs2.3.0.36.29.6.mlab.maskXX.planetlab
+ NAME = Man-Eating Seals of Antiquity
+ RHEL_MAJOR = 6
+ RHEL_MINOR = 1
 diff -Ndur linux-2.6.32-700/net/ipv4/sysctl_net_ipv4.c linux-2.6.32-700-xidmask/net/ipv4/sysctl_net_ipv4.c
 --- linux-2.6.32-700/net/ipv4/sysctl_net_ipv4.c	2013-01-10 14:18:50.233320698 -0500
-+++ linux-2.6.32-700-xidmask/net/ipv4/sysctl_net_ipv4.c	2013-01-10 14:30:18.997403751 -0500
-@@ -754,6 +754,22 @@
++++ linux-2.6.32-700-xidmask/net/ipv4/sysctl_net_ipv4.c	2013-01-19 15:41:52.767269242 -0500
+@@ -754,6 +754,14 @@
  		.mode		= 0644,
  		.proc_handler	= &web100_proc_dointvec_update,
  	},
@@ -25,30 +74,21 @@ diff -Ndur linux-2.6.32-700/net/ipv4/sysctl_net_ipv4.c linux-2.6.32-700-xidmask/
 +		.mode		= 0644,
 +		.proc_handler	= &web100_proc_dointvec_update,
 +	},
-+	{
-+		.ctl_name	= CTL_UNNUMBERED,
-+		.procname	= "web100_mask_xid",
-+		.data		= &sysctl_web100_mask_xid,
-+		.maxlen		= sizeof(int),
-+		.mode		= 0644,
-+		.proc_handler	= &web100_proc_dointvec_update,
-+	},
  #endif
  	{
  		.ctl_name	= CTL_UNNUMBERED,
 diff -Ndur linux-2.6.32-700/net/ipv4/tcp.c linux-2.6.32-700-xidmask/net/ipv4/tcp.c
 --- linux-2.6.32-700/net/ipv4/tcp.c	2013-01-10 14:18:50.234322447 -0500
-+++ linux-2.6.32-700-xidmask/net/ipv4/tcp.c	2013-01-10 14:21:16.368337586 -0500
-@@ -297,6 +297,8 @@
++++ linux-2.6.32-700-xidmask/net/ipv4/tcp.c	2013-01-19 15:42:50.975214376 -0500
+@@ -297,6 +297,7 @@
  #ifdef CONFIG_WEB100_STATS
  int sysctl_web100_fperms = CONFIG_WEB100_FPERMS;
  int sysctl_web100_gid = CONFIG_WEB100_GID;
-+int sysctl_web100_sidestream_xid = 0;
-+int sysctl_web100_mask_xid = -1;
++int sysctl_web100_sidestream_xid = -1;
  #endif
  
  atomic_t tcp_memory_allocated;	/* Current allocated memory. */
-@@ -848,7 +850,7 @@
+@@ -848,7 +849,7 @@
  		if (copied) {
  			tcp_push(sk, flags & ~MSG_MORE, mss_now, TCP_NAGLE_PUSH);
  #ifdef CONFIG_WEB100_STATS
@@ -57,7 +97,7 @@ diff -Ndur linux-2.6.32-700/net/ipv4/tcp.c linux-2.6.32-700-xidmask/net/ipv4/tcp
  #endif
  		}
  
-@@ -1101,7 +1103,7 @@
+@@ -1101,7 +1102,7 @@
  			if (copied) {
  				tcp_push(sk, flags & ~MSG_MORE, mss_now, TCP_NAGLE_PUSH);
  #ifdef CONFIG_WEB100_STATS
@@ -66,7 +106,7 @@ diff -Ndur linux-2.6.32-700/net/ipv4/tcp.c linux-2.6.32-700-xidmask/net/ipv4/tcp
  #endif
  			}
  
-@@ -1471,7 +1473,7 @@
+@@ -1471,7 +1472,7 @@
  					tp->rcv_nxt, flags);
  		}
  #ifdef CONFIG_WEB100_STATS
@@ -141,34 +181,181 @@ diff -Ndur linux-2.6.32-700/net/ipv4/tcp_ipv4.c linux-2.6.32-700-xidmask/net/ipv
  
 diff -Ndur linux-2.6.32-700/net/ipv4/web100_stats.c linux-2.6.32-700-xidmask/net/ipv4/web100_stats.c
 --- linux-2.6.32-700/net/ipv4/web100_stats.c	2013-01-10 14:18:50.231318735 -0500
-+++ linux-2.6.32-700-xidmask/net/ipv4/web100_stats.c	2013-01-10 14:21:16.373337472 -0500
-@@ -252,6 +252,16 @@
++++ linux-2.6.32-700-xidmask/net/ipv4/web100_stats.c	2013-01-19 23:53:31.434591210 -0500
+@@ -72,7 +72,123 @@
+ 	return cid % web100stats_htsize;
+ }
+ 
+-struct web100stats *web100stats_lookup(int cid)
++/*
++ * Determine if the given socket should have web100 stats structure.
++ *
++ * Args:
++ * 		sk -- socket pointer
++ * Returns:
++ * 		0 -- false, do not create the web100 stats struct
++ * 		1 -- true, create the web100 stats structure
++ */
++int vx_can_create_stats(struct sock *sk) {
++	struct vx_info *vxi=NULL;
++
++	if ( NULL == sk ) { 
++		return 0; 
++	}
++
++	if ( 0 != sk->sk_xid ) {
++		vxi = lookup_vx_info(sk->sk_xid);
++		if ( NULL != vxi ) {
++			printk("web100_stats_create():\n"); 
++			printk("    does xid:%d->ccaps:0x%016llx have 0x%08x set? ",
++					sk->sk_xid, vxi->vx_ccaps, VXC_ENABLE_WEB100);
++			if ( ! vx_info_ccaps(vxi, VXC_ENABLE_WEB100) ) {
++				printk("no!\n"); 
++				printk("    SKIPPING create for xid(%d)\n", sk->sk_xid);
++				/* do not create stats struct */
++				return 0;
++			} else {
++				printk("yes!\n"); 
++				printk("    CREATING stats for xid(%d)\n", sk->sk_xid);
++			}
++		} else {
++			printk("    NO VXINFO for xid:%d\n", sk->sk_xid);
++			printk("    CREATING stats for xid(%d)\n", sk->sk_xid);
++		}
++	}
++	/* create stats struct */
++	return 1;
++}
++
++/* 
++ * Determine if the current task has permission to read given stats struct. The 
++ * reader's identity is taken as the current task.  If the current task 
++ * has permission, then the function returns TRUE. Otherwise, FALSE.
++ * 
++ * At least one condition must be satisfied for the function to return TRUE:
++ *      xid == 0  -- reader is the root context of the system.
++ *      xid == stats->wc_sk->sk_xid -- reader created the stats object 
++ *      xid == web100_sidestream_xid -- reader can see all stats
++ *
++ * Args:
++ *      stats - the web100 stats structure to read.
++ *
++ * Returns:
++ *      0 - FALSE, read permission should be denied.
++ *      1 - TRUE, current task has read permission
++ */
++int vx_can_read_stats(struct web100stats *stats) {
++	struct vx_info *vxi=NULL;
++	struct sock *sk = NULL;
++
++	if ( NULL == stats || stats->wc_dead ) {
++		return 0; 
++	}
++
++	if ( 0 == vx_current_xid() ) {
++		// always ok for xid=0 (root context)
++		printk("vx_can_read_stats(): TRUE b/c current->xid==0\n"); 
++		return 1;
++	}
++
++	vxi = current_vx_info(); 
++	if ( NULL == vxi ) {
++		/* non-root context is missing vx_info; cannot check access flags */
++		printk("vx_can_read_stats(): FALSE b/c current->xid:%d vxi==NULL\n", vx_current_xid()); 
++		return 0;
++	}
++
++	if ( vx_current_xid() == sysctl_web100_sidestream_xid ) { 
++		/* the sidestream xid can view all stats. */
++		printk("vx_can_read_stats(): TRUE! b/c xid:%d == sstream:%d\n",
++				vx_current_xid(), sysctl_web100_sidestream_xid);
++		return 1;
++	}
++
++	sk = stats->wc_sk;
++	if ( vx_current_xid() == sk->sk_xid ) {
++		/* the xid is the socket owner so can see it's own connections */
++		printk("vx_can_read_stats(): TRUE! b/c xid:%d == sk_xid:%d\n",
++			vx_current_xid(), sk->sk_xid);
++		return 1;
++	}
++
++	/* all checks have failed, so deny read permission. */
++	printk("vx_can_read_stats(): FALSE!\n"); 
++	printk("    b/c  xid:%d != curr:%d\n",
++		   vx_current_xid(), sk->sk_xid);
++	printk("    AND, xid:%d != sidestream:%d\n",
++		   vx_current_xid(), sysctl_web100_sidestream_xid);
++	return 0;
++}
++
++/*
++ * Based on the connection ID, return the web100stats structure.
++ * Optionally, when vx_filter=1, filter the result by the 
++ * read-permission of the current task. When vx_filter=0, do not perform
++ * filtering.
++ *
++ * Args:
++ *  cid       -- connection id
++ *  vx_filter -- 1 or 0, filter the returned stats or not
++ *
++ * Returns:
++ *  If the cid is found, a pointer to a web100stats struct;
++ *  If the cid is not found or filtered, NULL is returned.
++ */
++struct web100stats *vx_web100stats_lookup(int cid, int vx_filter)
+ {
+ 	struct web100stats *stats;
+ 	
+@@ -83,6 +199,13 @@
+ 	stats = web100stats_ht[web100stats_hash(cid)];
+ 	while (stats && stats->wc_cid != cid)
+ 		stats = stats->wc_hash_next;
++	if ( 1 == vx_filter ) { 
++		if ( 1 == vx_can_read_stats(stats) ) {
++			return stats;
++		} else {
++			return NULL;
++		}
++	}
+ 	return stats;
+ }
+ 
+@@ -99,7 +222,8 @@
+ 	
+ 	i = web100stats_next_cid;
+ 	do {
+-		if (web100stats_lookup(i) == NULL)
++		/* use vx sensitive version *without* filtering */
++		if (vx_web100stats_lookup(i,0) == NULL)
+ 			break;
+ 		i = (i + 1) % WEB100_MAX_CONNS;
+ 	} while (i != web100stats_next_cid);
+@@ -252,6 +376,13 @@
  	struct web100directs *vars;
  	struct tcp_sock *tp = tcp_sk(sk);
  	struct timeval tv;
++	struct vx_info *vxi;
 +
-+	printk("Web100: stats_create(): checking xid(%d) mask(%d)\n",
-+				sk->sk_xid, sysctl_web100_mask_xid);
-+	if ( sk->sk_xid == sysctl_web100_mask_xid ) {
-+		/* this xid is masked, so do not allocate or update tcp_stats */
-+		printk("Web100: skipping stats_create() for xid(%d) mask(%d)\n",
-+				sk->sk_xid, sysctl_web100_mask_xid);
++	if ( 0 == vx_can_create_stats(sk) ) {
++		/* do not create web100 stats for this socket */
 +		tp->tcp_stats = NULL;
 +		return 0;
 +	}
  	
  	if ((stats = kmalloc(sizeof (struct web100stats), gfp_any())) == NULL)
  		return -ENOMEM;
-@@ -294,6 +304,9 @@
+@@ -294,6 +425,9 @@
  
  void web100_stats_destroy(struct web100stats *stats)
  {
-+    if ( stats == NULL ) {
-+        return;
-+    }
++	if ( NULL == stats ) {
++		return;
++	}
  	/* Attribute final sndlim time. */
  	web100_update_sndlim(tcp_sk(stats->wc_sk), stats->wc_limstate);
  	
+Binary files linux-2.6.32-700/net/ipv4/.web100_stats.c.swp and linux-2.6.32-700-xidmask/net/ipv4/.web100_stats.c.swp differ
 diff -Ndur linux-2.6.32-700/net/ipv6/tcp_ipv6.c linux-2.6.32-700-xidmask/net/ipv6/tcp_ipv6.c
 --- linux-2.6.32-700/net/ipv6/tcp_ipv6.c	2013-01-10 14:18:50.219284269 -0500
 +++ linux-2.6.32-700-xidmask/net/ipv6/tcp_ipv6.c	2013-01-10 14:21:16.373337472 -0500
