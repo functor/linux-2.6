@@ -1,6 +1,21 @@
 diff -Ndur linux-2.6.32-700/fs/proc/web100.c linux-2.6.32-700-xidmask/fs/proc/web100.c
 --- linux-2.6.32-700/fs/proc/web100.c	2013-01-10 14:18:50.429337747 -0500
-+++ linux-2.6.32-700-xidmask/fs/proc/web100.c	2013-01-19 23:39:00.433628214 -0500
++++ linux-2.6.32-700-xidmask/fs/proc/web100.c	2013-02-06 17:36:52.308961450 -0500
+@@ -427,10 +427,10 @@
+ 		local_port = vars->LocalPort;
+ 		remote_port = vars->RemPort;
+ 		
+-		len += v6addr_str(tmpbuf + len, (short *)&vars->LocalAddress.v6addr.addr);
+-		len += sprintf(tmpbuf + len, ".%d ", local_port);
+-		len += v6addr_str(tmpbuf + len, (short *)&vars->RemAddress.v6addr.addr);
+-		len += sprintf(tmpbuf + len, ".%d\n", remote_port);
++		len += snprintf(tmpbuf + len, sizeof(tmpbuf) - len, "%pI6", &vars->LocalAddress.v6addr.addr);
++		len += snprintf(tmpbuf + len, sizeof(tmpbuf) - len, ".%d ", local_port);
++		len += snprintf(tmpbuf + len, sizeof(tmpbuf) - len, "%pI6", &vars->RemAddress.v6addr.addr);
++		len += snprintf(tmpbuf + len, sizeof(tmpbuf) - len, ".%d\n", remote_port);
+ 	} else {
+ 		printk(KERN_ERR "connection_spec_ascii_read: LocalAddressType invalid\n");
+ 		return 0;
 @@ -655,7 +655,8 @@
  	
  	stats = web100stats_first;
@@ -169,8 +184,8 @@ diff -Ndur linux-2.6.32-700/net/ipv4/tcp_ipv4.c linux-2.6.32-700-xidmask/net/ipv
  
 diff -Ndur linux-2.6.32-700/net/ipv4/web100_stats.c linux-2.6.32-700-xidmask/net/ipv4/web100_stats.c
 --- linux-2.6.32-700/net/ipv4/web100_stats.c	2013-01-10 14:18:50.231318735 -0500
-+++ linux-2.6.32-700-xidmask/net/ipv4/web100_stats.c	2013-01-22 15:38:41.159794778 -0500
-@@ -72,7 +72,123 @@
++++ linux-2.6.32-700-xidmask/net/ipv4/web100_stats.c	2013-02-06 17:33:26.489910217 -0500
+@@ -72,7 +72,101 @@
  	return cid % web100stats_htsize;
  }
  
@@ -194,22 +209,11 @@ diff -Ndur linux-2.6.32-700/net/ipv4/web100_stats.c linux-2.6.32-700-xidmask/net
 +	if ( 0 != sk->sk_xid ) {
 +		vxi = lookup_vx_info(sk->sk_xid);
 +		if ( NULL != vxi ) {
-+			printk("web100_stats_create():\n"); 
-+			printk("    does xid:%d->ccaps:0x%016llx have 0x%08x set? ",
-+					sk->sk_xid, vxi->vx_ccaps, VXC_ENABLE_WEB100);
 +			if ( ! vx_info_ccaps(vxi, VXC_ENABLE_WEB100) ) {
-+				printk("no!\n"); 
-+				printk("    SKIPPING create for xid(%d)\n", sk->sk_xid);
 +				/* do not create stats struct */
 +				return 0;
-+			} else {
-+				printk("yes!\n"); 
-+				printk("    CREATING stats for xid(%d)\n", sk->sk_xid);
-+			}
-+		} else {
-+			printk("    NO VXINFO for xid:%d\n", sk->sk_xid);
-+			printk("    CREATING stats for xid(%d)\n", sk->sk_xid);
-+		}
++			} 
++		} 
 +	}
 +	/* create stats struct */
 +	return 1;
@@ -242,38 +246,27 @@ diff -Ndur linux-2.6.32-700/net/ipv4/web100_stats.c linux-2.6.32-700-xidmask/net
 +
 +	if ( 0 == vx_current_xid() ) {
 +		// always ok for xid=0 (root context)
-+		printk("vx_can_read_stats(): TRUE b/c current->xid==0\n"); 
 +		return 1;
 +	}
 +
 +	vxi = current_vx_info(); 
 +	if ( NULL == vxi ) {
 +		/* non-root context is missing vx_info; cannot check access flags */
-+		printk("vx_can_read_stats(): FALSE b/c current->xid:%d vxi==NULL\n", vx_current_xid()); 
 +		return 0;
 +	}
 +
 +	if ( vx_current_xid() == sysctl_web100_sidestream_xid ) { 
 +		/* the sidestream xid can view all stats. */
-+		printk("vx_can_read_stats(): TRUE! b/c xid:%d == sstream:%d\n",
-+				vx_current_xid(), sysctl_web100_sidestream_xid);
 +		return 1;
 +	}
 +
 +	sk = stats->wc_sk;
 +	if ( vx_current_xid() == sk->sk_xid ) {
 +		/* the xid is the socket owner so can see it's own connections */
-+		printk("vx_can_read_stats(): TRUE! b/c xid:%d == sk_xid:%d\n",
-+			vx_current_xid(), sk->sk_xid);
 +		return 1;
 +	}
 +
 +	/* all checks have failed, so deny read permission. */
-+	printk("vx_can_read_stats(): FALSE!\n"); 
-+	printk("    b/c  xid:%d != curr:%d\n",
-+		   vx_current_xid(), sk->sk_xid);
-+	printk("    AND, xid:%d != sidestream:%d\n",
-+		   vx_current_xid(), sysctl_web100_sidestream_xid);
 +	return 0;
 +}
 +
@@ -295,7 +288,7 @@ diff -Ndur linux-2.6.32-700/net/ipv4/web100_stats.c linux-2.6.32-700-xidmask/net
  {
  	struct web100stats *stats;
  	
-@@ -83,7 +199,10 @@
+@@ -83,7 +177,10 @@
  	stats = web100stats_ht[web100stats_hash(cid)];
  	while (stats && stats->wc_cid != cid)
  		stats = stats->wc_hash_next;
@@ -307,7 +300,7 @@ diff -Ndur linux-2.6.32-700/net/ipv4/web100_stats.c linux-2.6.32-700-xidmask/net
  }
  
  /* This will get really slow as the cid space fills.  This can be done
-@@ -99,7 +218,8 @@
+@@ -99,7 +196,8 @@
  	
  	i = web100stats_next_cid;
  	do {
@@ -317,7 +310,7 @@ diff -Ndur linux-2.6.32-700/net/ipv4/web100_stats.c linux-2.6.32-700-xidmask/net
  			break;
  		i = (i + 1) % WEB100_MAX_CONNS;
  	} while (i != web100stats_next_cid);
-@@ -252,6 +372,12 @@
+@@ -252,6 +350,12 @@
  	struct web100directs *vars;
  	struct tcp_sock *tp = tcp_sk(sk);
  	struct timeval tv;
@@ -330,7 +323,7 @@ diff -Ndur linux-2.6.32-700/net/ipv4/web100_stats.c linux-2.6.32-700-xidmask/net
  	
  	if ((stats = kmalloc(sizeof (struct web100stats), gfp_any())) == NULL)
  		return -ENOMEM;
-@@ -294,6 +420,9 @@
+@@ -294,6 +398,9 @@
  
  void web100_stats_destroy(struct web100stats *stats)
  {
