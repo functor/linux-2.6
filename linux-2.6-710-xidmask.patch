@@ -184,8 +184,8 @@ diff -Ndur linux-2.6.32-700/net/ipv4/tcp_ipv4.c linux-2.6.32-700-xidmask/net/ipv
  
 diff -Ndur linux-2.6.32-700/net/ipv4/web100_stats.c linux-2.6.32-700-xidmask/net/ipv4/web100_stats.c
 --- linux-2.6.32-700/net/ipv4/web100_stats.c	2013-01-10 14:18:50.231318735 -0500
-+++ linux-2.6.32-700-xidmask/net/ipv4/web100_stats.c	2013-02-06 17:33:26.489910217 -0500
-@@ -72,7 +72,101 @@
++++ linux-2.6.32-700-xidmask/net/ipv4/web100_stats.c	2013-02-06 22:25:11.711402213 -0500
+@@ -72,7 +72,99 @@
  	return cid % web100stats_htsize;
  }
  
@@ -208,11 +208,9 @@ diff -Ndur linux-2.6.32-700/net/ipv4/web100_stats.c linux-2.6.32-700-xidmask/net
 +
 +	if ( 0 != sk->sk_xid ) {
 +		vxi = lookup_vx_info(sk->sk_xid);
-+		if ( NULL != vxi ) {
-+			if ( ! vx_info_ccaps(vxi, VXC_ENABLE_WEB100) ) {
-+				/* do not create stats struct */
-+				return 0;
-+			} 
++		if ( NULL != vxi && !vx_info_ccaps(vxi, VXC_ENABLE_WEB100) ) {
++			/* do not create stats struct */
++			return 0;
 +		} 
 +	}
 +	/* create stats struct */
@@ -288,7 +286,7 @@ diff -Ndur linux-2.6.32-700/net/ipv4/web100_stats.c linux-2.6.32-700-xidmask/net
  {
  	struct web100stats *stats;
  	
-@@ -83,7 +177,10 @@
+@@ -83,7 +175,10 @@
  	stats = web100stats_ht[web100stats_hash(cid)];
  	while (stats && stats->wc_cid != cid)
  		stats = stats->wc_hash_next;
@@ -300,7 +298,7 @@ diff -Ndur linux-2.6.32-700/net/ipv4/web100_stats.c linux-2.6.32-700-xidmask/net
  }
  
  /* This will get really slow as the cid space fills.  This can be done
-@@ -99,7 +196,8 @@
+@@ -99,7 +194,8 @@
  	
  	i = web100stats_next_cid;
  	do {
@@ -310,7 +308,7 @@ diff -Ndur linux-2.6.32-700/net/ipv4/web100_stats.c linux-2.6.32-700-xidmask/net
  			break;
  		i = (i + 1) % WEB100_MAX_CONNS;
  	} while (i != web100stats_next_cid);
-@@ -252,6 +350,12 @@
+@@ -252,6 +348,12 @@
  	struct web100directs *vars;
  	struct tcp_sock *tp = tcp_sk(sk);
  	struct timeval tv;
@@ -323,7 +321,7 @@ diff -Ndur linux-2.6.32-700/net/ipv4/web100_stats.c linux-2.6.32-700-xidmask/net
  	
  	if ((stats = kmalloc(sizeof (struct web100stats), gfp_any())) == NULL)
  		return -ENOMEM;
-@@ -294,6 +398,9 @@
+@@ -294,6 +396,9 @@
  
  void web100_stats_destroy(struct web100stats *stats)
  {
