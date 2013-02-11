@@ -7,7 +7,7 @@ sed -i -e "/\# CONFIG_KVM is not set/d" config-x86-generic-rhel
 sed -i -e "s,CONFIG_MODULE_SIG=y,CONFIG_MODULE_SIG=n,g" config-generic-rhel
 
 # Do not enable CONFIG_SYSFS_DEPRECATED options for Scientific Linux
-if ! grep -q Scientific /etc/redhat-release; then
+if ! grep -qiE "CentOS.*6.3|Scientific" /etc/redhat-release; then
 	sed -i -e "s,# CONFIG_SYSFS_DEPRECATED is not set,CONFIG_SYSFS_DEPRECATED=y,g" config-generic
 	sed -i -e "s,# CONFIG_SYSFS_DEPRECATED_V2 is not set,CONFIG_SYSFS_DEPRECATED_V2=y,g" config-generic
 fi
