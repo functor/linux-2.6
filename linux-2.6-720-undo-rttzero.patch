@@ -1,0 +1,17 @@
+diff -Ndur linux-2.6.32-orig/net/ipv4/tcp_input.c linux-2.6.32-undorttzero/net/ipv4/tcp_input.c
+--- linux-2.6.32-orig/net/ipv4/tcp_input.c	2013-06-05 15:47:10.551009408 -0400
++++ linux-2.6.32-undorttzero/net/ipv4/tcp_input.c	2013-06-05 15:49:32.458996663 -0400
+@@ -5783,9 +5783,11 @@
+ 
+ 				/* tcp_ack considers this ACK as duplicate
+ 				 * and does not calculate rtt.
+-				 * Force it here.
++				 * Fix it at least with timestamps.
+ 				 */
+-				tcp_ack_update_rtt(sk, 0, 0);
++				if (tp->rx_opt.saw_tstamp && 
++					tp->rx_opt.rcv_tsecr && !tp->srtt)
++						tcp_ack_saw_tstamp(sk, 0);
+ 
+ 				if (tp->rx_opt.tstamp_ok)
+ 					tp->advmss -= TCPOLEN_TSTAMP_ALIGNED;
