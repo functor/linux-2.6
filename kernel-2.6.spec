@@ -11,7 +11,7 @@ URL: %{SCMURL}
 %define name linux-2.6
 %define module_version_varname sublevel
 # 131 borrowed from centos6.1, tg3 from 220 centos 6.2
-%define taglevel 131.vs230.web10027.xidmask.2
+%define taglevel 131.vs230.web10027.xidmask.3
 
 %define sublevel 33
 
@@ -688,6 +688,7 @@ Patch21: linux-2.6-690-web100.patch
 Patch22: linux-2.6-700-bcm5720.patch
 Patch23: linux-2.6-710-xidmask.patch
 Patch24: linux-2.6-720-undo-rttzero.patch
+Patch25: linux-2.6-730-cred-fix-kernel-panic-upon-security_file_alloc-failure.patch
 
 Patch10000: linux-2.6-10000-gcc-4.5.patch
 Patch10001: linux-2.6-10001-gcc-4.6-warnoff.patch
@@ -1011,6 +1012,7 @@ ApplyPatch linux-2.6-690-web100.patch
 ApplyPatch linux-2.6-700-bcm5720.patch
 ApplyPatch linux-2.6-710-xidmask.patch
 ApplyPatch linux-2.6-720-undo-rttzero.patch
+ApplyPatch linux-2.6-730-cred-fix-kernel-panic-upon-security_file_alloc-failure.patch
 ApplyPatch linux-2.6-10000-gcc-4.5.patch
 ApplyPatch linux-2.6-10001-gcc-4.6-warnoff.patch
 ApplyPatch linux-2.6-10002-gcc-4.6-sense_buffer.patch
