@@ -1834,11 +1834,11 @@ fi
 /etc/ld.so.conf.d/kernel-%{KVERREL}%{?2:.%{2}}.conf\
 %endif\
 /lib/modules/%{KVERREL}%{?2:.%{2}}/modules.*\
-### PlanetLab ###
+### PlanetLab ###\
 %if %{with_firmware}\
 /lib/firmware/*\
 %endif\
-### PlanetLab ###
+### PlanetLab ###\
 %if 0%{?3} \
 %{_libexecdir}/%{KVERREL}%{?2:.%{2}}/vm/page-types\
 %{_libexecdir}/%{KVERREL}%{?2:.%{2}}/vm/slabinfo\
