@@ -11,7 +11,8 @@ URL: %{SCMURL}
 %define name linux-2.6
 %define module_version_varname sublevel
 # 646.6.2 borrowed from centos6.8
-%define taglevel 642.6.2
+%define vs_version 2.3.0.36.29.6
+%define taglevel 642.6.2.vs${vs_version}
 
 %define sublevel 33
 
