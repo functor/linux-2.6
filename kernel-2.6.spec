@@ -654,7 +654,7 @@ Source85: config-i686-debug
 Source86: config-powerpc64-debug
 
 #### Planet-Lab ####
-# Patch1: patch-2.6.32-131.0.15.el6-vs2.3.0.36.29.6.diff
+Patch1: patch-2.6.32-vs2.3.0.36.29.6.diff
 # Patch2: linux-2.6-255-vserver-delta-cow-fix23.patch
 # Patch3: linux-2.6-250-ipsets.patch
 # Patch4: linux-2.6-510-ipod.patch
@@ -1010,7 +1010,7 @@ cp %{SOURCE15} %{SOURCE1} %{SOURCE16} %{SOURCE17} %{SOURCE18} .
 make -f %{SOURCE20} VERSION=%{version} configs
 
 #### Planet-Lab ####
-# ApplyPatch patch-2.6.32-131.0.15.el6-vs2.3.0.36.29.6.diff
+ApplyPatch patch-2.6.32-vs2.3.0.36.29.6.diff
 # ApplyPatch linux-2.6-255-vserver-delta-cow-fix23.patch
 # ApplyPatch linux-2.6-250-ipsets.patch
 # ApplyPatch linux-2.6-510-ipod.patch
