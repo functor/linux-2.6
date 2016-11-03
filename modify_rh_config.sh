@@ -3,7 +3,6 @@
 pushd SOURCES > /dev/null
 
 sed -i -e "s,CONFIG_IPV6=m,CONFIG_IPV6=y,g" config-generic
-sed -i -e "/\# CONFIG_KVM is not set/d" config-x86-generic-rhel
 sed -i -e "s,CONFIG_MODULE_SIG=y,CONFIG_MODULE_SIG=n,g" config-generic-rhel
 
 sed -i -e "s,CONFIG_CRYPTO_SIGNATURE=y,CONFIG_CRYPTO_SIGNATURE=n,g" config-generic-rhel
