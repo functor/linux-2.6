@@ -656,7 +656,6 @@ Source86: config-powerpc64-debug
 
 #### Planet-Lab ####
 Patch1: patch-2.6.32-642.6.2-vs2.3.0.36.29.6.diff
-# Patch2: linux-2.6-255-vserver-delta-cow-fix23.patch
 # Patch3: linux-2.6-250-ipsets.patch
 # Patch4: linux-2.6-510-ipod.patch
 # Patch5: linux-2.6-521-packet-tagging.patch
@@ -1012,7 +1011,6 @@ make -f %{SOURCE20} VERSION=%{version} configs
 
 #### Planet-Lab ####
 ApplyPatch patch-2.6.32-642.6.2-vs2.3.0.36.29.6.diff
-# ApplyPatch linux-2.6-255-vserver-delta-cow-fix23.patch
 # ApplyPatch linux-2.6-250-ipsets.patch
 # ApplyPatch linux-2.6-510-ipod.patch
 # ApplyPatch linux-2.6-521-packet-tagging.patch
