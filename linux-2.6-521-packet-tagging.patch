@@ -1,21 +1,8 @@
-From 5d0cfcf3f26b5aafe91f23fa9095461bdf83c074 Mon Sep 17 00:00:00 2001
-From: S.Çağlar Onur <caglar@cs.princeton.edu>
-Date: Tue, 7 Dec 2010 11:06:08 -0500
-Subject: [PATCH] linux-2.6-521-packet-tagging.patch
-
----
- include/linux/skbuff.h       |    2 ++
- net/core/skbuff.c            |    2 ++
- net/core/sock.c              |    2 ++
- net/ipv4/af_inet.c           |    2 ++
- net/ipv4/netfilter/ipt_LOG.c |    2 ++
- 5 files changed, 10 insertions(+), 0 deletions(-)
-
 diff --git a/include/linux/skbuff.h b/include/linux/skbuff.h
-index 69af253..0670992 100644
+index fbd0dc7..5cd5e9c 100644
 --- a/include/linux/skbuff.h
 +++ b/include/linux/skbuff.h
-@@ -391,6 +391,8 @@ struct sk_buff {
+@@ -478,6 +478,8 @@ struct sk_buff {
  		__u32		dropcount;
  	};
  
@@ -25,30 +12,30 @@ index 69af253..0670992 100644
  #ifndef __GENKSYMS__
  	__u16			rxhash;
 diff --git a/net/core/skbuff.c b/net/core/skbuff.c
-index 841664f..371324c 100644
+index 48593de..6a0153a 100644
 --- a/net/core/skbuff.c
 +++ b/net/core/skbuff.c
-@@ -208,6 +208,7 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t gfp_mask,
- 	skb->mac_header = ~0U;
+@@ -214,6 +214,7 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t gfp_mask,
+ 	skb->transport_header = ~0U;
  #endif
  
 +	if (!in_interrupt()) skb->skb_tag = nx_current_nid(); else skb->skb_tag = 0;
  	/* make sure we initialize shinfo sequentially */
  	shinfo = skb_shinfo(skb);
  	atomic_set(&shinfo->dataref, 1);
-@@ -562,6 +563,7 @@ static void __copy_skb_header(struct sk_buff *new, const struct sk_buff *old)
+@@ -634,6 +635,7 @@ static void __copy_skb_header(struct sk_buff *new, const struct sk_buff *old)
  #endif
  #endif
  	new->vlan_tci		= old->vlan_tci;
 +	new->skb_tag            = old->skb_tag;
  
  	skb_copy_secmark(new, old);
- }
+ 
 diff --git a/net/core/sock.c b/net/core/sock.c
-index f406c4b..40197d6 100644
+index ed068e1..5b70afc 100644
 --- a/net/core/sock.c
 +++ b/net/core/sock.c
-@@ -1081,6 +1081,8 @@ struct sock *sk_alloc(struct net *net, int family, gfp_t priority,
+@@ -1176,6 +1176,8 @@ struct sock *sk_alloc(struct net *net, int family, gfp_t priority,
  		sk->sk_prot = sk->sk_prot_creator = prot;
  		sock_lock_init(sk);
  		sock_net_set(sk, get_net(net));
@@ -58,10 +45,10 @@ index f406c4b..40197d6 100644
  
  		sock_update_classid(sk);
 diff --git a/net/ipv4/af_inet.c b/net/ipv4/af_inet.c
-index e3213b2..3f29c1f 100644
+index 6a8a6fd..4ba7f40 100644
 --- a/net/ipv4/af_inet.c
 +++ b/net/ipv4/af_inet.c
-@@ -181,6 +181,8 @@ static int inet_autobind(struct sock *sk)
+@@ -178,6 +178,8 @@ static int inet_autobind(struct sock *sk)
  			return -EAGAIN;
  		}
  		inet->sport = htons(inet->num);
@@ -71,15 +58,15 @@ index e3213b2..3f29c1f 100644
  	release_sock(sk);
  	return 0;
 diff --git a/net/ipv4/netfilter/ipt_LOG.c b/net/ipv4/netfilter/ipt_LOG.c
-index acc44c6..ac29a8c 100644
+index 7d3992f..0964bb4 100644
 --- a/net/ipv4/netfilter/ipt_LOG.c
 +++ b/net/ipv4/netfilter/ipt_LOG.c
-@@ -45,6 +45,8 @@ static void dump_packet(const struct nf_loginfo *info,
+@@ -44,6 +44,8 @@ static void dump_packet(struct sbuff *m,
  	else
  		logflags = NF_LOG_MASK;
  
-+	printk("TAG=%d ", skb->skb_tag);
++	sb_add(m, "TAG=%d ", skb->skb_tag);
 +
  	ih = skb_header_pointer(skb, iphoff, sizeof(_iph), &_iph);
  	if (ih == NULL) {
- 		printk("TRUNCATED");
+ 		sb_add(m, "TRUNCATED");
