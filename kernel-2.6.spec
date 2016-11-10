@@ -660,7 +660,7 @@ Patch1: patch-2.6.32-642.6.2-vs2.3.0.36.29.6.diff
 Patch5: linux-2.6-521-packet-tagging.patch
 Patch6: linux-2.6-522-iptables-connection-tagging.patch
 Patch7: linux-2.6-523-raw-sockets.patch
-#Patch8: linux-2.6-524-peercred.patch
+Patch8: linux-2.6-524-peercred.patch
 #Patch9: linux-2.6-525-sknid-elevator.patch
 # Patch10: linux-2.6-527-iptables-classify-add-mark.patch
 # Patch11: linux-2.6-530-built-by-support.patch
@@ -1014,7 +1014,7 @@ ApplyPatch patch-2.6.32-642.6.2-vs2.3.0.36.29.6.diff
 ApplyPatch linux-2.6-521-packet-tagging.patch
 ApplyPatch linux-2.6-522-iptables-connection-tagging.patch
 ApplyPatch linux-2.6-523-raw-sockets.patch
-#ApplyPatch linux-2.6-524-peercred.patch
+ApplyPatch linux-2.6-524-peercred.patch
 #ApplyPatch linux-2.6-525-sknid-elevator.patch
 # ApplyPatch linux-2.6-527-iptables-classify-add-mark.patch
 # ApplyPatch linux-2.6-530-built-by-support.patch
