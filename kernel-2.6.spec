@@ -661,7 +661,7 @@ Patch5: linux-2.6-521-packet-tagging.patch
 Patch6: linux-2.6-522-iptables-connection-tagging.patch
 Patch7: linux-2.6-523-raw-sockets.patch
 Patch8: linux-2.6-524-peercred.patch
-#Patch9: linux-2.6-525-sknid-elevator.patch
+Patch9: linux-2.6-525-sknid-elevator.patch
 # Patch10: linux-2.6-527-iptables-classify-add-mark.patch
 # Patch11: linux-2.6-530-built-by-support.patch
 # Patch12: linux-2.6-550-raise-default-nfile-ulimit.patch
@@ -1015,7 +1015,7 @@ ApplyPatch linux-2.6-521-packet-tagging.patch
 ApplyPatch linux-2.6-522-iptables-connection-tagging.patch
 ApplyPatch linux-2.6-523-raw-sockets.patch
 ApplyPatch linux-2.6-524-peercred.patch
-#ApplyPatch linux-2.6-525-sknid-elevator.patch
+ApplyPatch linux-2.6-525-sknid-elevator.patch
 # ApplyPatch linux-2.6-527-iptables-classify-add-mark.patch
 # ApplyPatch linux-2.6-530-built-by-support.patch
 # #ApplyPatch linux-2.6-540-oom-kill.patch
