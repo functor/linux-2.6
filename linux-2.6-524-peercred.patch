@@ -1,18 +1,8 @@
-From 841f39f9467a5f7da0c09b7453d65340a13e586b Mon Sep 17 00:00:00 2001
-From: S.Çağlar Onur <caglar@cs.princeton.edu>
-Date: Tue, 7 Dec 2010 11:07:24 -0500
-Subject: [PATCH] linux-2.6-524-peercred.patch
-
----
- include/linux/socket.h |    2 ++
- net/core/sock.c        |    1 +
- 2 files changed, 3 insertions(+), 0 deletions(-)
-
 diff --git a/include/linux/socket.h b/include/linux/socket.h
-index 59966f1..d8a6e19 100644
+index 3920b0b..78c99ec 100644
 --- a/include/linux/socket.h
 +++ b/include/linux/socket.h
-@@ -298,6 +298,8 @@ struct ucred {
+@@ -306,6 +306,8 @@ struct ucred {
  #define SOL_RDS		276
  #define SOL_IUCV	277
  
@@ -22,10 +12,10 @@ index 59966f1..d8a6e19 100644
  #define IPX_TYPE	1
  
 diff --git a/net/core/sock.c b/net/core/sock.c
-index 4638715..75d2875 100644
+index 0aa0896..e5f72c5 100644
 --- a/net/core/sock.c
 +++ b/net/core/sock.c
-@@ -548,6 +548,7 @@ set_sndbuf:
+@@ -584,6 +584,7 @@ set_sndbuf:
  		}
  		sk->sk_xid = val;
  		sk->sk_nid = val;
@@ -33,6 +23,3 @@ index 4638715..75d2875 100644
  		break;
  
  	case SO_RCVBUF:
--- 
-1.5.4.3
-
