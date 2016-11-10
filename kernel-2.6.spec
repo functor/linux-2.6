@@ -665,7 +665,7 @@ Patch9: linux-2.6-525-sknid-elevator.patch
 Patch10: linux-2.6-527-iptables-classify-add-mark.patch
 # Patch11: linux-2.6-530-built-by-support.patch
 Patch12: linux-2.6-550-raise-default-nfile-ulimit.patch
-# Patch13: linux-2.6-570-tagxid.patch
+Patch13: linux-2.6-570-tagxid.patch
 # Patch14: linux-2.6-580-show-proc-virt.patch
 # Patch15: linux-2.6-590-dcookies-mm.patch
 # Patch16: linux-2.6-591-chopstix-intern.patch
@@ -1020,7 +1020,7 @@ ApplyPatch linux-2.6-527-iptables-classify-add-mark.patch
 # ApplyPatch linux-2.6-530-built-by-support.patch
 # #ApplyPatch linux-2.6-540-oom-kill.patch
 ApplyPatch linux-2.6-550-raise-default-nfile-ulimit.patch
-# ApplyPatch linux-2.6-570-tagxid.patch
+ApplyPatch linux-2.6-570-tagxid.patch
 # ApplyPatch linux-2.6-580-show-proc-virt.patch
 # ApplyPatch linux-2.6-590-dcookies-mm.patch
 # ApplyPatch linux-2.6-591-chopstix-intern.patch
