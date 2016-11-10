@@ -1,13 +1,3 @@
-From 118aff8ad7923cee696104afd4a62531d4d737fd Mon Sep 17 00:00:00 2001
-From: S.Çağlar Onur <caglar@cs.princeton.edu>
-Date: Tue, 7 Dec 2010 11:08:01 -0500
-Subject: [PATCH] linux-2.6-527-iptables-classify-add-mark.patch
-
----
- include/linux/netfilter/xt_CLASSIFY.h |    1 +
- net/netfilter/xt_CLASSIFY.c           |    2 ++
- 2 files changed, 3 insertions(+), 0 deletions(-)
-
 diff --git a/include/linux/netfilter/xt_CLASSIFY.h b/include/linux/netfilter/xt_CLASSIFY.h
 index a813bf1..c5cec1d 100644
 --- a/include/linux/netfilter/xt_CLASSIFY.h
@@ -33,6 +23,3 @@ index 011bc80..5732034 100644
  	return XT_CONTINUE;
  }
  
--- 
-1.5.4.3
-
