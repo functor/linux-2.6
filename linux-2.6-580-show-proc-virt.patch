@@ -1,15 +1,5 @@
-From 9c400d0ee1489eb2242183568343c906fdff4781 Mon Sep 17 00:00:00 2001
-From: S.Çağlar Onur <caglar@cs.princeton.edu>
-Date: Tue, 7 Dec 2010 11:09:05 -0500
-Subject: [PATCH] linux-2.6-580-show-proc-virt.patch
-
----
- kernel/vserver/context.c |    2 +-
- kernel/vserver/network.c |    2 +-
- 2 files changed, 2 insertions(+), 2 deletions(-)
-
 diff --git a/kernel/vserver/context.c b/kernel/vserver/context.c
-index 4b49403..b0e2bd4 100644
+index e262be5..e8d5924 100644
 --- a/kernel/vserver/context.c
 +++ b/kernel/vserver/context.c
 @@ -433,7 +433,7 @@ int get_xid_list(int index, unsigned int *xids, int size)
@@ -22,7 +12,7 @@ index 4b49403..b0e2bd4 100644
  			return 0;
  		xids[nr_xids] = vx_current_xid();
 diff --git a/kernel/vserver/network.c b/kernel/vserver/network.c
-index 3f5a766..a374522 100644
+index 2ade217..6df9fa7 100644
 --- a/kernel/vserver/network.c
 +++ b/kernel/vserver/network.c
 @@ -392,7 +392,7 @@ int get_nid_list(int index, unsigned int *nids, int size)
@@ -34,6 +24,3 @@ index 3f5a766..a374522 100644
  		if (index > 0)
  			return 0;
  		nids[nr_nids] = nx_current_nid();
--- 
-1.5.4.3
-
