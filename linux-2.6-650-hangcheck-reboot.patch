@@ -1,12 +1,3 @@
-From 34ebe8186d08873e8f9d16233f868fae16151a61 Mon Sep 17 00:00:00 2001
-From: S.Çağlar Onur <caglar@cs.princeton.edu>
-Date: Tue, 7 Dec 2010 11:10:15 -0500
-Subject: [PATCH] linux-2.6-650-hangcheck-reboot.patch
-
----
- drivers/char/hangcheck-timer.c |    6 +++---
- 1 files changed, 3 insertions(+), 3 deletions(-)
-
 diff --git a/drivers/char/hangcheck-timer.c b/drivers/char/hangcheck-timer.c
 index 712d9f2..054c4df 100644
 --- a/drivers/char/hangcheck-timer.c
@@ -31,6 +22,3 @@ index 712d9f2..054c4df 100644
  #if defined (HAVE_MONOTONIC)
  	printk("Hangcheck: Using monotonic_clock().\n");
  #else
--- 
-1.5.4.3
-
