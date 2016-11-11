@@ -671,7 +671,7 @@ Patch14: linux-2.6-580-show-proc-virt.patch
 # Patch16: linux-2.6-591-chopstix-intern.patch
 Patch17: linux-2.6-640-netlink-audit-hack.patch
 Patch18: linux-2.6-650-hangcheck-reboot.patch
-# Patch19: linux-2.6-660-nmi-watchdog-default.patch
+Patch19: linux-2.6-660-nmi-watchdog-default.patch
 # Patch20: linux-2.6-680-htb-hysteresis-tso.patch
 # Patch21: linux-2.6-690-web100.patch
 # Patch22: linux-2.6-700-bcm5720.patch
@@ -1026,7 +1026,7 @@ ApplyPatch linux-2.6-580-show-proc-virt.patch
 # ApplyPatch linux-2.6-591-chopstix-intern.patch
 ApplyPatch linux-2.6-640-netlink-audit-hack.patch
 ApplyPatch linux-2.6-650-hangcheck-reboot.patch
-# ApplyPatch linux-2.6-660-nmi-watchdog-default.patch
+ApplyPatch linux-2.6-660-nmi-watchdog-default.patch
 # ApplyPatch linux-2.6-680-htb-hysteresis-tso.patch
 # ApplyPatch linux-2.6-690-web100.patch
 # ApplyPatch linux-2.6-700-bcm5720.patch

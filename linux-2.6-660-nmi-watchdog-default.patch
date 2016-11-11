@@ -1,17 +1,8 @@
-From 4b974e68d0e322d4232f9357e8476c24ba9e7912 Mon Sep 17 00:00:00 2001
-From: S.Çağlar Onur <caglar@cs.princeton.edu>
-Date: Tue, 7 Dec 2010 11:10:26 -0500
-Subject: [PATCH] linux-2.6-660-nmi-watchdog-default.patch
-
----
- arch/x86/kernel/apic/nmi.c |    2 +-
- 1 files changed, 1 insertions(+), 1 deletions(-)
-
 diff --git a/arch/x86/kernel/apic/nmi.c b/arch/x86/kernel/apic/nmi.c
-index 4d975c5..4de2200 100644
+index 515035a..3894c1c 100644
 --- a/arch/x86/kernel/apic/nmi.c
 +++ b/arch/x86/kernel/apic/nmi.c
-@@ -53,7 +53,7 @@ EXPORT_SYMBOL(nmi_active);
+@@ -52,7 +52,7 @@ EXPORT_SYMBOL(nmi_active);
  #ifdef CONFIG_X86_64
  unsigned int nmi_watchdog = NMI_DEFAULT;
  #else
@@ -20,6 +11,3 @@ index 4d975c5..4de2200 100644
  #endif
  EXPORT_SYMBOL(nmi_watchdog);
  
--- 
-1.5.4.3
-
