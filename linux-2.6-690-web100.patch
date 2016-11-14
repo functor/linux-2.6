@@ -1,6 +1,8 @@
-diff -Naur linux-2.6.32-27.planetlab.i686.orig/Documentation/web100/locking.txt linux-2.6.32-27.planetlab.i686/Documentation/web100/locking.txt
---- linux-2.6.32-27.planetlab.i686.orig/Documentation/web100/locking.txt	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.32-27.planetlab.i686/Documentation/web100/locking.txt	2011-11-16 16:51:06.764471232 -0500
+diff --git a/Documentation/web100/locking.txt b/Documentation/web100/locking.txt
+new file mode 100644
+index 0000000..b8ed239
+--- /dev/null
++++ b/Documentation/web100/locking.txt
 @@ -0,0 +1,33 @@
 +Web100 Locking Model for Linux 2.4
 +John Heffner <jheffner@psc.edu>
@@ -35,9 +37,11 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/Documentation/web100/locking.txt 
 +are no remaining references.  The lookup structures keep one reference.  The
 +sock also keeps one, since the sock may be destroyed before it ever enters
 +the ESTABLISHED state.
-diff -Naur linux-2.6.32-27.planetlab.i686.orig/Documentation/web100/proc_interface.txt linux-2.6.32-27.planetlab.i686/Documentation/web100/proc_interface.txt
---- linux-2.6.32-27.planetlab.i686.orig/Documentation/web100/proc_interface.txt	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.32-27.planetlab.i686/Documentation/web100/proc_interface.txt	2011-11-16 16:51:06.764471232 -0500
+diff --git a/Documentation/web100/proc_interface.txt b/Documentation/web100/proc_interface.txt
+new file mode 100644
+index 0000000..772a763
+--- /dev/null
++++ b/Documentation/web100/proc_interface.txt
 @@ -0,0 +1,102 @@
 +WEB100 proc interface notes
 +===========================
@@ -141,9 +145,11 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/Documentation/web100/proc_interfa
 +John Heffner, Matt Mathis, R. Reddy
 +August 2000, Jan 2001
 +
-diff -Naur linux-2.6.32-27.planetlab.i686.orig/Documentation/web100/sysctl.txt linux-2.6.32-27.planetlab.i686/Documentation/web100/sysctl.txt
---- linux-2.6.32-27.planetlab.i686.orig/Documentation/web100/sysctl.txt	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.32-27.planetlab.i686/Documentation/web100/sysctl.txt	2011-11-16 16:51:06.764471232 -0500
+diff --git a/Documentation/web100/sysctl.txt b/Documentation/web100/sysctl.txt
+new file mode 100644
+index 0000000..8dd8e55
+--- /dev/null
++++ b/Documentation/web100/sysctl.txt
 @@ -0,0 +1,24 @@
 +Web100 sysctl variables
 +John Heffner <jheffner@psc.edu>
@@ -169,18 +175,33 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/Documentation/web100/sysctl.txt l
 +
 +net.ipv4.web100_gid
 +	Sets the group of the files in /proc/web100/*/
-diff -Naur linux-2.6.32-27.planetlab.i686.orig/fs/proc/Makefile linux-2.6.32-27.planetlab.i686/fs/proc/Makefile
---- linux-2.6.32-27.planetlab.i686.orig/fs/proc/Makefile	2011-11-16 16:51:07.757475369 -0500
-+++ linux-2.6.32-27.planetlab.i686/fs/proc/Makefile	2011-11-16 16:51:06.202465318 -0500
-@@ -26,3 +26,4 @@
+diff --git a/Makefile b/Makefile
+index 05e12a6..ee76ce9 100644
+--- a/Makefile
++++ b/Makefile
+@@ -1,7 +1,7 @@
+ VERSION = 2
+ PATCHLEVEL = 6
+ SUBLEVEL = 32
+-EXTRAVERSION =
++EXTRAVERSION = -web100
+ NAME = Man-Eating Seals of Antiquity
+ RHEL_MAJOR = 6
+ RHEL_MINOR = 8
+diff --git a/fs/proc/Makefile b/fs/proc/Makefile
+index 461c50c..be9b824 100644
+--- a/fs/proc/Makefile
++++ b/fs/proc/Makefile
+@@ -27,3 +27,4 @@ proc-$(CONFIG_PROC_VMCORE)	+= vmcore.o
  proc-$(CONFIG_PROC_DEVICETREE)	+= proc_devtree.o
  proc-$(CONFIG_PRINTK)	+= kmsg.o
  proc-$(CONFIG_PROC_PAGE_MONITOR)	+= page.o
 +proc-$(CONFIG_WEB100_STATS)	+= web100.o
-diff -Naur linux-2.6.32-27.planetlab.i686.orig/fs/proc/root.c linux-2.6.32-27.planetlab.i686/fs/proc/root.c
---- linux-2.6.32-27.planetlab.i686.orig/fs/proc/root.c	2011-11-16 16:51:07.757475369 -0500
-+++ linux-2.6.32-27.planetlab.i686/fs/proc/root.c	2011-11-16 16:51:06.194471290 -0500
-@@ -142,6 +142,10 @@
+diff --git a/fs/proc/root.c b/fs/proc/root.c
+index f84ed68..dac3e7b 100644
+--- a/fs/proc/root.c
++++ b/fs/proc/root.c
+@@ -189,6 +189,10 @@ void __init proc_root_init(void)
  	proc_mkdir("bus", NULL);
  	proc_sys_init();
  	proc_vx_init();
@@ -191,9 +212,11 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/fs/proc/root.c linux-2.6.32-27.pl
  }
  
  static int proc_root_getattr(struct vfsmount *mnt, struct dentry *dentry, struct kstat *stat
-diff -Naur linux-2.6.32-27.planetlab.i686.orig/fs/proc/web100.c linux-2.6.32-27.planetlab.i686/fs/proc/web100.c
---- linux-2.6.32-27.planetlab.i686.orig/fs/proc/web100.c	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.32-27.planetlab.i686/fs/proc/web100.c	2011-11-16 16:51:06.194471290 -0500
+diff --git a/fs/proc/web100.c b/fs/proc/web100.c
+new file mode 100644
+index 0000000..a88d778
+--- /dev/null
++++ b/fs/proc/web100.c
 @@ -0,0 +1,1368 @@
 +/*  
 + *  fs/proc/web100.c
@@ -1563,21 +1586,23 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/fs/proc/web100.c linux-2.6.32-27.
 +	        write_CwndAdjust, 0);
 +#endif
 +}
-diff -Naur linux-2.6.32-27.planetlab.i686.orig/include/linux/netlink.h linux-2.6.32-27.planetlab.i686/include/linux/netlink.h
---- linux-2.6.32-27.planetlab.i686.orig/include/linux/netlink.h	2011-11-16 16:51:07.258471024 -0500
-+++ linux-2.6.32-27.planetlab.i686/include/linux/netlink.h	2011-11-16 16:51:05.954471154 -0500
-@@ -24,6 +24,7 @@
- /* leave room for NETLINK_DM (DM Events) */
+diff --git a/include/linux/netlink.h b/include/linux/netlink.h
+index 7a48f4f..0ed1acb 100644
+--- a/include/linux/netlink.h
++++ b/include/linux/netlink.h
+@@ -25,6 +25,7 @@
  #define NETLINK_SCSITRANSPORT	18	/* SCSI Transports */
  #define NETLINK_ECRYPTFS	19
+ #define NETLINK_RDMA		20
 +#define NETLINK_WEB100		29
  
  #define MAX_LINKS 32		
  
-diff -Naur linux-2.6.32-27.planetlab.i686.orig/include/linux/proc_fs.h linux-2.6.32-27.planetlab.i686/include/linux/proc_fs.h
---- linux-2.6.32-27.planetlab.i686.orig/include/linux/proc_fs.h	2011-11-16 16:51:07.251471052 -0500
-+++ linux-2.6.32-27.planetlab.i686/include/linux/proc_fs.h	2011-11-16 16:51:05.947470992 -0500
-@@ -105,6 +105,10 @@
+diff --git a/include/linux/proc_fs.h b/include/linux/proc_fs.h
+index 73de497..73404da 100644
+--- a/include/linux/proc_fs.h
++++ b/include/linux/proc_fs.h
+@@ -109,6 +109,10 @@ struct vmcore {
  
  extern void proc_root_init(void);
  
@@ -1588,10 +1613,11 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/include/linux/proc_fs.h linux-2.6
  void proc_flush_task(struct task_struct *task);
  
  extern struct proc_dir_entry *create_proc_entry(const char *name, mode_t mode,
-diff -Naur linux-2.6.32-27.planetlab.i686.orig/include/linux/sysctl.h linux-2.6.32-27.planetlab.i686/include/linux/sysctl.h
---- linux-2.6.32-27.planetlab.i686.orig/include/linux/sysctl.h	2011-11-16 16:51:07.289470904 -0500
-+++ linux-2.6.32-27.planetlab.i686/include/linux/sysctl.h	2011-11-16 16:51:05.985470940 -0500
-@@ -1007,6 +1007,10 @@
+diff --git a/include/linux/sysctl.h b/include/linux/sysctl.h
+index b33793f..1fa385c 100644
+--- a/include/linux/sysctl.h
++++ b/include/linux/sysctl.h
+@@ -1012,6 +1012,10 @@ extern int proc_doulongvec_ms_jiffies_minmax(struct ctl_table *table, int,
  				      void __user *, size_t *, loff_t *);
  extern int proc_do_large_bitmap(struct ctl_table *, int,
  				void __user *, size_t *, loff_t *);
@@ -1602,23 +1628,25 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/include/linux/sysctl.h linux-2.6.
  
  extern int do_sysctl (int __user *name, int nlen,
  		      void __user *oldval, size_t __user *oldlenp,
-diff -Naur linux-2.6.32-27.planetlab.i686.orig/include/linux/tcp.h linux-2.6.32-27.planetlab.i686/include/linux/tcp.h
---- linux-2.6.32-27.planetlab.i686.orig/include/linux/tcp.h	2011-11-16 16:51:07.288470911 -0500
-+++ linux-2.6.32-27.planetlab.i686/include/linux/tcp.h	2011-11-16 16:51:05.983450204 -0500
-@@ -414,6 +414,10 @@
- 		thin_dupack : 1,/* Fast retransmit on first dupack      */
- 		unused      : 6;
+diff --git a/include/linux/tcp.h b/include/linux/tcp.h
+index b671c8c..a89ffec 100644
+--- a/include/linux/tcp.h
++++ b/include/linux/tcp.h
+@@ -451,6 +451,10 @@ struct tcp_sock {
+ 				 * The total number of segments sent.
+ 				 */
  #endif
 +
 +#ifdef CONFIG_WEB100_STATS
-+	struct web100stats	*tcp_stats;
++        struct web100stats      *tcp_stats;
 +#endif
  };
  
- static inline struct tcp_sock *tcp_sk(const struct sock *sk)
-diff -Naur linux-2.6.32-27.planetlab.i686.orig/include/net/tcp.h linux-2.6.32-27.planetlab.i686/include/net/tcp.h
---- linux-2.6.32-27.planetlab.i686.orig/include/net/tcp.h	2011-11-16 16:51:07.240470973 -0500
-+++ linux-2.6.32-27.planetlab.i686/include/net/tcp.h	2011-11-16 16:51:05.935471062 -0500
+ enum tsq_flags {
+diff --git a/include/net/tcp.h b/include/net/tcp.h
+index b79aba3..76b18be 100644
+--- a/include/net/tcp.h
++++ b/include/net/tcp.h
 @@ -45,6 +45,8 @@
  
  #include <linux/seq_file.h>
@@ -1628,10 +1656,10 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/include/net/tcp.h linux-2.6.32-27
  extern struct inet_hashinfo tcp_hashinfo;
  
  extern struct percpu_counter tcp_orphan_count;
-@@ -242,6 +244,14 @@
- extern int sysctl_tcp_max_ssthresh;
- extern int sysctl_tcp_thin_linear_timeouts;
- extern int sysctl_tcp_thin_dupack;
+@@ -257,6 +259,14 @@ extern int sysctl_tcp_thin_dupack;
+ extern int sysctl_tcp_limit_output_bytes;
+ extern int sysctl_tcp_challenge_ack_limit;
+ extern int sysctl_tcp_min_tso_segs;
 +#ifdef CONFIG_WEB100_NET100
 +extern int sysctl_WAD_IFQ;
 +extern int sysctl_WAD_MaxBurst;
@@ -1643,7 +1671,7 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/include/net/tcp.h linux-2.6.32-27
  
  extern atomic_t tcp_memory_allocated;
  extern struct percpu_counter tcp_sockets_allocated;
-@@ -834,6 +844,10 @@
+@@ -896,6 +906,10 @@ extern __u32 tcp_init_cwnd(struct tcp_sock *tp, struct dst_entry *dst);
   */
  static __inline__ __u32 tcp_max_burst(const struct tcp_sock *tp)
  {
@@ -1654,9 +1682,11 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/include/net/tcp.h linux-2.6.32-27
  	return tp->reordering;
  }
  
-diff -Naur linux-2.6.32-27.planetlab.i686.orig/include/net/web100.h linux-2.6.32-27.planetlab.i686/include/net/web100.h
---- linux-2.6.32-27.planetlab.i686.orig/include/net/web100.h	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.32-27.planetlab.i686/include/net/web100.h	2011-11-16 16:51:05.931471093 -0500
+diff --git a/include/net/web100.h b/include/net/web100.h
+new file mode 100644
+index 0000000..7ca1b54
+--- /dev/null
++++ b/include/net/web100.h
 @@ -0,0 +1,123 @@
 +/* 
 + *  include/net/web100.h
@@ -1781,9 +1811,11 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/include/net/web100.h linux-2.6.32
 +#endif /* CONFIG_WEB100_STATS */
 +
 +#endif /* _WEB100_H */
-diff -Naur linux-2.6.32-27.planetlab.i686.orig/include/net/web100_stats.h linux-2.6.32-27.planetlab.i686/include/net/web100_stats.h
---- linux-2.6.32-27.planetlab.i686.orig/include/net/web100_stats.h	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.32-27.planetlab.i686/include/net/web100_stats.h	2011-11-16 16:51:05.933470945 -0500
+diff --git a/include/net/web100_stats.h b/include/net/web100_stats.h
+new file mode 100644
+index 0000000..12d81d0
+--- /dev/null
++++ b/include/net/web100_stats.h
 @@ -0,0 +1,346 @@
 +/*
 + * include/net/web100_stats.h
@@ -2131,22 +2163,11 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/include/net/web100_stats.h linux-
 +#endif /* CONFIG_WEB100_STATS */ /* } */
 +
 +#endif		/*_WEB100_STATS_H */
-diff -Naur linux-2.6.32-27.planetlab.i686.orig/Makefile linux-2.6.32-27.planetlab.i686/Makefile
---- linux-2.6.32-27.planetlab.i686.orig/Makefile	2011-11-16 16:51:08.409611307 -0500
-+++ linux-2.6.32-27.planetlab.i686/Makefile	2011-11-16 16:51:06.773471236 -0500
-@@ -1,7 +1,7 @@
- VERSION = 2
- PATCHLEVEL = 6
- SUBLEVEL = 32
--EXTRAVERSION =
-+EXTRAVERSION = -web100
- NAME = Man-Eating Seals of Antiquity
- RHEL_MAJOR = 6
- RHEL_MINOR = 1
-diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/Kconfig linux-2.6.32-27.planetlab.i686/net/ipv4/Kconfig
---- linux-2.6.32-27.planetlab.i686.orig/net/ipv4/Kconfig	2011-11-16 16:51:07.412471138 -0500
-+++ linux-2.6.32-27.planetlab.i686/net/ipv4/Kconfig	2011-11-16 16:51:06.107470833 -0500
-@@ -627,6 +627,70 @@
+diff --git a/net/ipv4/Kconfig b/net/ipv4/Kconfig
+index c7231dd..65219fd 100644
+--- a/net/ipv4/Kconfig
++++ b/net/ipv4/Kconfig
+@@ -653,3 +653,67 @@ config TCP_MD5SIG
  
  	  If unsure, say N.
  
@@ -2160,8 +2181,8 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/Kconfig linux-2.6.32-27.
 +	bool "Web100: Extended TCP statistics"
 +	depends on WEB100
 +	---help---
-+	  Support for the Web100 implementation of the TCP extended stastics
-+	  MIB (see http://www.web100.org/mib/).
++	Support for the Web100 implementation of the TCP extended stastics
++	MIB (see http://www.web100.org/mib/).
 +
 +if WEB100_STATS
 +
@@ -2175,10 +2196,10 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/Kconfig linux-2.6.32-27.
 +	  the sysctl variable net.ipv4.web100_fperms.  Unless all users on
 +	  the system are trusted, it is safest to limit both readability
 +	  and writability to trusted users.
-+	  
++
 +	  Due to limitations of the kernel config scripts, this is a decimal
 +	  value rather than octal.  Some common values:
-+	  
++
 +	    384 = 0600 = rw-------
 +	    416 = 0640 = rw-r-----
 +	    432 = 0660 = rw-rw----
@@ -2214,13 +2235,11 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/Kconfig linux-2.6.32-27.
 +
 +endif
 +
- #
- # Emulab special
- #
-diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/Makefile linux-2.6.32-27.planetlab.i686/net/ipv4/Makefile
---- linux-2.6.32-27.planetlab.i686.orig/net/ipv4/Makefile	2011-11-16 16:51:07.413470925 -0500
-+++ linux-2.6.32-27.planetlab.i686/net/ipv4/Makefile	2011-11-16 16:51:06.109471129 -0500
-@@ -32,6 +32,7 @@
+diff --git a/net/ipv4/Makefile b/net/ipv4/Makefile
+index e18daba..1114500 100644
+--- a/net/ipv4/Makefile
++++ b/net/ipv4/Makefile
+@@ -34,6 +34,7 @@ obj-$(CONFIG_INET_TUNNEL) += tunnel4.o
  obj-$(CONFIG_INET_XFRM_MODE_TRANSPORT) += xfrm4_mode_transport.o
  obj-$(CONFIG_INET_XFRM_MODE_TUNNEL) += xfrm4_mode_tunnel.o
  obj-$(CONFIG_IP_PNP) += ipconfig.o
@@ -2228,10 +2247,11 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/Makefile linux-2.6.32-27
  obj-$(CONFIG_NETFILTER)	+= netfilter.o netfilter/
  obj-$(CONFIG_INET_DIAG) += inet_diag.o 
  obj-$(CONFIG_INET_TCP_DIAG) += tcp_diag.o
-diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/sysctl_net_ipv4.c linux-2.6.32-27.planetlab.i686/net/ipv4/sysctl_net_ipv4.c
---- linux-2.6.32-27.planetlab.i686.orig/net/ipv4/sysctl_net_ipv4.c	2011-11-16 16:51:07.413470925 -0500
-+++ linux-2.6.32-27.planetlab.i686/net/ipv4/sysctl_net_ipv4.c	2011-11-16 16:51:06.108471039 -0500
-@@ -719,6 +719,42 @@
+diff --git a/net/ipv4/sysctl_net_ipv4.c b/net/ipv4/sysctl_net_ipv4.c
+index 554c04b..d80dcd8 100644
+--- a/net/ipv4/sysctl_net_ipv4.c
++++ b/net/ipv4/sysctl_net_ipv4.c
+@@ -789,6 +789,42 @@ static struct ctl_table ipv4_table[] = {
  		.mode		= 0644,
  		.proc_handler	= proc_dointvec,
  	},
@@ -2274,10 +2294,11 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/sysctl_net_ipv4.c linux-
  	{
  		.ctl_name	= CTL_UNNUMBERED,
  		.procname       = "tcp_thin_linear_timeouts",
-diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp.c linux-2.6.32-27.planetlab.i686/net/ipv4/tcp.c
---- linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp.c	2011-11-16 16:51:07.413470925 -0500
-+++ linux-2.6.32-27.planetlab.i686/net/ipv4/tcp.c	2011-11-16 16:51:06.108471039 -0500
-@@ -289,6 +289,16 @@
+diff --git a/net/ipv4/tcp.c b/net/ipv4/tcp.c
+index 2a4553d..92fbcc0 100644
+--- a/net/ipv4/tcp.c
++++ b/net/ipv4/tcp.c
+@@ -292,6 +292,16 @@ EXPORT_SYMBOL(sysctl_tcp_mem);
  EXPORT_SYMBOL(sysctl_tcp_rmem);
  EXPORT_SYMBOL(sysctl_tcp_wmem);
  
@@ -2294,7 +2315,7 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp.c linux-2.6.32-27.pl
  atomic_t tcp_memory_allocated;	/* Current allocated memory. */
  EXPORT_SYMBOL(tcp_memory_allocated);
  
-@@ -835,8 +845,12 @@
+@@ -868,8 +878,12 @@ new_segment:
  wait_for_sndbuf:
  		set_bit(SOCK_NOSPACE, &sk->sk_socket->flags);
  wait_for_memory:
@@ -2308,7 +2329,7 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp.c linux-2.6.32-27.pl
  
  		if ((err = sk_stream_wait_memory(sk, &timeo)) != 0)
  			goto do_error;
-@@ -1084,8 +1098,12 @@
+@@ -1117,8 +1131,12 @@ new_segment:
  wait_for_sndbuf:
  			set_bit(SOCK_NOSPACE, &sk->sk_socket->flags);
  wait_for_memory:
@@ -2322,7 +2343,7 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp.c linux-2.6.32-27.pl
  
  			if ((err = sk_stream_wait_memory(sk, &timeo)) != 0)
  				goto do_error;
-@@ -1452,6 +1470,9 @@
+@@ -1497,6 +1515,9 @@ int tcp_recvmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
  					*seq, TCP_SKB_CB(skb)->seq,
  					tp->rcv_nxt, flags);
  		}
@@ -2332,7 +2353,7 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp.c linux-2.6.32-27.pl
  
  		/* Well, if we have backlog, try to process it now yet. */
  
-@@ -1754,6 +1775,8 @@
+@@ -1799,6 +1820,8 @@ void tcp_set_state(struct sock *sk, int state)
  {
  	int oldstate = sk->sk_state;
  
@@ -2341,7 +2362,7 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp.c linux-2.6.32-27.pl
  	switch (state) {
  	case TCP_ESTABLISHED:
  		if (oldstate != TCP_ESTABLISHED)
-@@ -2138,6 +2161,7 @@
+@@ -2185,6 +2208,7 @@ static int do_tcp_setsockopt(struct sock *sk, int level,
  		} else {
  			tp->nonagle &= ~TCP_NAGLE_OFF;
  		}
@@ -2349,7 +2370,7 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp.c linux-2.6.32-27.pl
  		break;
  
  	case TCP_THIN_LINEAR_TIMEOUTS:
-@@ -2174,6 +2198,7 @@
+@@ -2221,6 +2245,7 @@ static int do_tcp_setsockopt(struct sock *sk, int level,
  				tp->nonagle |= TCP_NAGLE_PUSH;
  			tcp_push_pending_frames(sk);
  		}
@@ -2357,21 +2378,21 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp.c linux-2.6.32-27.pl
  		break;
  
  	case TCP_KEEPIDLE:
-@@ -2996,6 +3021,10 @@
- 	       tcp_hashinfo.ehash_size, tcp_hashinfo.bhash_size);
+@@ -3057,6 +3082,9 @@ void __init tcp_init(void)
  
  	tcp_register_congestion_control(&tcp_reno);
-+	
+ 	tcp_tasklet_init();
 +#ifdef CONFIG_WEB100_STATS
 +	web100_stats_init();
 +#endif
  }
  
  EXPORT_SYMBOL(tcp_close);
-diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_cong.c linux-2.6.32-27.planetlab.i686/net/ipv4/tcp_cong.c
---- linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_cong.c	2011-11-16 16:51:07.414470925 -0500
-+++ linux-2.6.32-27.planetlab.i686/net/ipv4/tcp_cong.c	2011-11-16 16:51:06.109471129 -0500
-@@ -316,7 +316,8 @@
+diff --git a/net/ipv4/tcp_cong.c b/net/ipv4/tcp_cong.c
+index 845338a..e0e4a14 100644
+--- a/net/ipv4/tcp_cong.c
++++ b/net/ipv4/tcp_cong.c
+@@ -324,7 +324,8 @@ void tcp_slow_start(struct tcp_sock *tp)
  		return;
  
  	if (sysctl_tcp_max_ssthresh > 0 && tp->snd_cwnd > sysctl_tcp_max_ssthresh)
@@ -2379,9 +2400,9 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_cong.c linux-2.6.32-
 +		/* limited slow start */
 +		cnt = NET100_WAD(tp, WAD_MaxSsthresh, sysctl_tcp_max_ssthresh) >> 1;
  	else
- 		cnt = tp->snd_cwnd;			/* exponential increase */
+ 		cnt = snd_cwnd;				/* exponential increase */
  
-@@ -364,8 +365,10 @@
+@@ -372,8 +373,10 @@ void tcp_reno_cong_avoid(struct sock *sk, u32 ack, u32 in_flight)
  		return;
  
  	/* In "safe" area, increase. */
@@ -2393,7 +2414,7 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_cong.c linux-2.6.32-
  
  	/* In dangerous area, increase slowly. */
  	else if (sysctl_tcp_abc) {
-@@ -377,8 +380,10 @@
+@@ -385,8 +388,10 @@ void tcp_reno_cong_avoid(struct sock *sk, u32 ack, u32 in_flight)
  			if (tp->snd_cwnd < tp->snd_cwnd_clamp)
  				tp->snd_cwnd++;
  		}
@@ -2404,10 +2425,11 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_cong.c linux-2.6.32-
  	}
  }
  EXPORT_SYMBOL_GPL(tcp_reno_cong_avoid);
-diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_input.c linux-2.6.32-27.planetlab.i686/net/ipv4/tcp_input.c
---- linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_input.c	2011-11-16 16:51:07.412471138 -0500
-+++ linux-2.6.32-27.planetlab.i686/net/ipv4/tcp_input.c	2011-11-16 16:51:06.107470833 -0500
-@@ -461,6 +461,7 @@
+diff --git a/net/ipv4/tcp_input.c b/net/ipv4/tcp_input.c
+index d664790..ce0a4e0 100644
+--- a/net/ipv4/tcp_input.c
++++ b/net/ipv4/tcp_input.c
+@@ -482,6 +482,7 @@ static void tcp_rcv_rtt_update(struct tcp_sock *tp, u32 sample, int win_dep)
  
  	if (tp->rcv_rtt_est.rtt != new_sample)
  		tp->rcv_rtt_est.rtt = new_sample;
@@ -2415,7 +2437,7 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_input.c linux-2.6.32
  }
  
  static inline void tcp_rcv_rtt_measure(struct tcp_sock *tp)
-@@ -597,6 +598,7 @@
+@@ -618,6 +619,7 @@ static void tcp_event_data_recv(struct sock *sk, struct sk_buff *skb)
  
  	if (skb->len >= 128)
  		tcp_grow_window(sk, skb);
@@ -2423,7 +2445,7 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_input.c linux-2.6.32
  }
  
  /* Called to compute a smoothed rtt estimate. The data fed to this
-@@ -843,6 +845,7 @@
+@@ -879,6 +881,7 @@ void tcp_enter_cwr(struct sock *sk, const int set_ssthresh)
  
  		tcp_set_ca_state(sk, TCP_CA_CWR);
  	}
@@ -2431,15 +2453,15 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_input.c linux-2.6.32
  }
  
  /*
-@@ -886,6 +889,7 @@
+@@ -927,6 +930,7 @@ static void tcp_init_metrics(struct sock *sk)
  	    tp->reordering != dst_metric(dst, RTAX_REORDERING)) {
  		tcp_disable_fack(tp);
  		tp->reordering = dst_metric(dst, RTAX_REORDERING);
 +		WEB100_VAR_SET(tp, RetranThresh, tp->reordering);
  	}
  
- 	if (dst_metric(dst, RTAX_RTT) == 0)
-@@ -946,6 +950,7 @@
+ 	if (dst_metric(dst, RTAX_RTT) == 0 || tp->srtt == 0)
+@@ -986,6 +990,7 @@ static void tcp_update_reordering(struct sock *sk, const int metric,
  		int mib_idx;
  
  		tp->reordering = min(TCP_MAX_REORDERING, metric);
@@ -2447,7 +2469,7 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_input.c linux-2.6.32
  
  		/* This exciting event is worth to be remembered. 8) */
  		if (ts)
-@@ -1733,6 +1738,9 @@
+@@ -1772,6 +1777,9 @@ tcp_sacktag_write_queue(struct sock *sk, struct sk_buff *ack_skb,
  	state.flag = 0;
  	state.reord = tp->packets_out;
  
@@ -2457,7 +2479,7 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_input.c linux-2.6.32
  	if (!tp->sacked_out) {
  		if (WARN_ON(tp->fackets_out))
  			tp->fackets_out = 0;
-@@ -2208,6 +2216,8 @@
+@@ -2247,6 +2255,8 @@ void tcp_enter_loss(struct sock *sk, int how)
  	struct tcp_sock *tp = tcp_sk(sk);
  	struct sk_buff *skb;
  
@@ -2466,7 +2488,7 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_input.c linux-2.6.32
  	/* Reduce ssthresh if it has not yet been made inside this window. */
  	if (icsk->icsk_ca_state <= TCP_CA_Disorder || tp->snd_una == tp->high_seq ||
  	    (icsk->icsk_ca_state == TCP_CA_Loss && !icsk->icsk_retransmits)) {
-@@ -2253,6 +2263,7 @@
+@@ -2292,6 +2302,7 @@ void tcp_enter_loss(struct sock *sk, int how)
  
  	tp->reordering = min_t(unsigned int, tp->reordering,
  			       sysctl_tcp_reordering);
@@ -2474,7 +2496,7 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_input.c linux-2.6.32
  	tcp_set_ca_state(sk, TCP_CA_Loss);
  	tp->high_seq = tp->snd_nxt;
  	TCP_ECN_queue_cwr(tp);
-@@ -2580,8 +2591,19 @@
+@@ -2619,8 +2630,19 @@ static void tcp_update_scoreboard(struct sock *sk, int fast_rexmit)
   */
  static inline void tcp_moderate_cwnd(struct tcp_sock *tp)
  {
@@ -2494,16 +2516,16 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_input.c linux-2.6.32
  	tp->snd_cwnd_stamp = tcp_time_stamp;
  }
  
-@@ -2677,6 +2699,7 @@
+@@ -2744,6 +2766,7 @@ static void tcp_undo_cwr(struct sock *sk, const bool undo_ssthresh)
+ 		tp->snd_cwnd = max(tp->snd_cwnd, tp->snd_ssthresh);
  	}
- 	tcp_moderate_cwnd(tp);
  	tp->snd_cwnd_stamp = tcp_time_stamp;
-+	WEB100_VAR_INC(tp, CongestionOverCount);	/* XXX This is wrong. -JWH */
++	WEB100_VAR_INC(tp, CongestionOverCount);        /* XXX This is wrong. -JWH */
  }
  
  static inline int tcp_may_undo(struct tcp_sock *tp)
-@@ -3069,6 +3092,8 @@
- 		tp->snd_cwnd_cnt = 0;
+@@ -3171,6 +3194,8 @@ static void tcp_fastretrans_alert(struct sock *sk, int pkts_acked,
+ 		tp->prr_out = 0;
  		tcp_set_ca_state(sk, TCP_CA_Recovery);
  		fast_rexmit = 1;
 +		WEB100_UPDATE_FUNC(tp, web100_update_congestion(tp, 0));
@@ -2511,15 +2533,15 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_input.c linux-2.6.32
  	}
  
  	if (do_lost || (tcp_is_fack(tp) && tcp_head_timedout(sk)))
-@@ -3082,6 +3107,7 @@
+@@ -3185,6 +3210,7 @@ void tcp_valid_rtt_meas(struct sock *sk, u32 seq_rtt)
  	tcp_rtt_estimator(sk, seq_rtt);
  	tcp_set_rto(sk);
  	inet_csk(sk)->icsk_backoff = 0;
 +	WEB100_UPDATE_FUNC(tcp_sk(sk), web100_update_rtt(sk, seq_rtt));
  }
+ EXPORT_SYMBOL(tcp_valid_rtt_meas);
  
- /* Read draft-ietf-tcplw-high-performance before mucking
-@@ -3140,6 +3166,27 @@
+@@ -3244,6 +3270,27 @@ static inline void tcp_ack_update_rtt(struct sock *sk, const int flag,
  static void tcp_cong_avoid(struct sock *sk, u32 ack, u32 in_flight)
  {
  	const struct inet_connection_sock *icsk = inet_csk(sk);
@@ -2547,7 +2569,7 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_input.c linux-2.6.32
  	icsk->icsk_ca_ops->cong_avoid(sk, ack, in_flight);
  	tcp_sk(sk)->snd_cwnd_stamp = tcp_time_stamp;
  }
-@@ -3428,10 +3475,12 @@
+@@ -3554,10 +3601,12 @@ static int tcp_ack_update_window(struct sock *sk, struct sk_buff *skb, u32 ack,
  				tp->max_window = nwin;
  				tcp_sync_mss(sk, inet_csk(sk)->icsk_pmtu_cookie);
  			}
@@ -2555,20 +2577,20 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_input.c linux-2.6.32
  		}
  	}
  
- 	tp->snd_una = ack;
+ 	tcp_snd_una_update(tp, ack);
 +	WEB100_UPDATE_FUNC(tp, web100_update_snd_una(tp));
  
  	return flag;
  }
-@@ -3623,6 +3672,7 @@
+@@ -3821,6 +3870,7 @@ static int tcp_ack(struct sock *sk, struct sk_buff *skb, int flag)
  		 */
  		tcp_update_wl(tp, ack_seq);
- 		tp->snd_una = ack;
+ 		tcp_snd_una_update(tp, ack);
 +		WEB100_UPDATE_FUNC(tp, web100_update_snd_una(tp));
  		flag |= FLAG_WIN_UPDATE;
  
  		tcp_ca_event(sk, CA_EVENT_FAST_ACK);
-@@ -3639,8 +3689,10 @@
+@@ -3837,8 +3887,10 @@ static int tcp_ack(struct sock *sk, struct sk_buff *skb, int flag)
  		if (TCP_SKB_CB(skb)->sacked)
  			flag |= tcp_sacktag_write_queue(sk, skb, prior_snd_una);
  
@@ -2580,7 +2602,7 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_input.c linux-2.6.32
  
  		tcp_ca_event(sk, CA_EVENT_SLOW_ACK);
  	}
-@@ -4118,6 +4170,8 @@
+@@ -4312,6 +4364,8 @@ static void tcp_send_dupack(struct sock *sk, struct sk_buff *skb)
  {
  	struct tcp_sock *tp = tcp_sk(sk);
  
@@ -2589,7 +2611,7 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_input.c linux-2.6.32
  	if (TCP_SKB_CB(skb)->end_seq != TCP_SKB_CB(skb)->seq &&
  	    before(TCP_SKB_CB(skb)->seq, tp->rcv_nxt)) {
  		NET_INC_STATS_BH(sock_net(sk), LINUX_MIB_DELAYEDACKLOST);
-@@ -4371,6 +4425,10 @@
+@@ -4564,6 +4618,10 @@ queue_and_out:
  
  		tcp_fast_path_check(sk);
  
@@ -2600,7 +2622,7 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_input.c linux-2.6.32
  		if (eaten > 0)
  			__kfree_skb(skb);
  		else if (!sock_flag(sk, SOCK_DEAD))
-@@ -4425,6 +4483,9 @@
+@@ -4621,6 +4679,9 @@ drop:
  	SOCK_DEBUG(sk, "out of order segment: rcv_next %X seq %X - %X\n",
  		   tp->rcv_nxt, TCP_SKB_CB(skb)->seq, TCP_SKB_CB(skb)->end_seq);
  
@@ -2610,7 +2632,7 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_input.c linux-2.6.32
  	skb_set_owner_r(skb, sk);
  
  	if (!skb_peek(&tp->out_of_order_queue)) {
-@@ -4778,6 +4839,8 @@
+@@ -4963,6 +5024,8 @@ void tcp_cwnd_application_limited(struct sock *sk)
  		if (win_used < tp->snd_cwnd) {
  			tp->snd_ssthresh = tcp_current_ssthresh(sk);
  			tp->snd_cwnd = (tp->snd_cwnd + win_used) >> 1;
@@ -2619,8 +2641,8 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_input.c linux-2.6.32
  		}
  		tp->snd_cwnd_used = 0;
  	}
-@@ -5308,6 +5371,9 @@
- 				tp->rcv_nxt = TCP_SKB_CB(skb)->end_seq;
+@@ -5502,6 +5565,9 @@ int tcp_rcv_established(struct sock *sk, struct sk_buff *skb,
+ 				tcp_rcv_nxt_update(tcp_sk(sk), TCP_SKB_CB(skb)->end_seq);
  			}
  
 +#ifdef CONFIG_WEB100_STATS
@@ -2629,7 +2651,7 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_input.c linux-2.6.32
  			tcp_event_data_recv(sk, skb);
  
  			if (TCP_SKB_CB(skb)->ack_seq != tp->snd_una) {
-@@ -5476,6 +5542,9 @@
+@@ -5672,6 +5738,9 @@ static int tcp_rcv_synsent_state_process(struct sock *sk, struct sk_buff *skb,
  		tp->copied_seq = tp->rcv_nxt;
  		smp_mb();
  		tcp_set_state(sk, TCP_ESTABLISHED);
@@ -2639,7 +2661,7 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_input.c linux-2.6.32
  
  		security_inet_conn_established(sk, skb);
  
-@@ -5694,6 +5763,9 @@
+@@ -5894,6 +5963,9 @@ int tcp_rcv_state_process(struct sock *sk, struct sk_buff *skb,
  				smp_mb();
  				tcp_set_state(sk, TCP_ESTABLISHED);
  				sk->sk_state_change(sk);
@@ -2649,10 +2671,11 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_input.c linux-2.6.32
  
  				/* Note, that this wakeup is only for marginal
  				 * crossed SYN case. Passively open sockets
-diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_ipv4.c linux-2.6.32-27.planetlab.i686/net/ipv4/tcp_ipv4.c
---- linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_ipv4.c	2011-11-16 16:51:07.414470925 -0500
-+++ linux-2.6.32-27.planetlab.i686/net/ipv4/tcp_ipv4.c	2011-11-16 17:04:35.157317153 -0500
-@@ -243,6 +243,10 @@
+diff --git a/net/ipv4/tcp_ipv4.c b/net/ipv4/tcp_ipv4.c
+index fa5863a..8e127c8 100644
+--- a/net/ipv4/tcp_ipv4.c
++++ b/net/ipv4/tcp_ipv4.c
+@@ -247,6 +247,10 @@ int tcp_v4_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
  							   inet->daddr,
  							   inet->sport,
  							   usin->sin_port);
@@ -2663,7 +2686,7 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_ipv4.c linux-2.6.32-
  
  	inet->id = tp->write_seq ^ jiffies;
  
-@@ -381,6 +385,7 @@
+@@ -385,6 +389,7 @@ void tcp_v4_err(struct sk_buff *icmp_skb, u32 info)
  
  	switch (type) {
  	case ICMP_SOURCE_QUENCH:
@@ -2671,7 +2694,7 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_ipv4.c linux-2.6.32-
  		/* Just silently ignore these. */
  		goto out;
  	case ICMP_PARAMETERPROB:
-@@ -1373,6 +1378,13 @@
+@@ -1389,6 +1394,13 @@ struct sock *tcp_v4_syn_recv_sock(struct sock *sk, struct sk_buff *skb,
  	newsk = tcp_create_openreq_child(sk, req, skb);
  	if (!newsk)
  		goto exit_nonewsk;
@@ -2685,23 +2708,23 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_ipv4.c linux-2.6.32-
  
  	newsk->sk_gso_type = SKB_GSO_TCPV4;
  	sk_setup_caps(newsk, dst);
-@@ -1626,6 +1638,7 @@
- 	inet_rps_save_rxhash(sk, skb->rxhash);
+@@ -1657,6 +1669,7 @@ process:
  
  	bh_lock_sock_nested(sk);
+ 	tcp_sk(sk)->segs_in += max_t(u16, 1, skb_shinfo(skb)->gso_segs);
 +	WEB100_UPDATE_FUNC(tcp_sk(sk), web100_update_segrecv(tcp_sk(sk), skb));
  	ret = 0;
  	if (!sock_owned_by_user(sk)) {
  #ifdef CONFIG_NET_DMA
-@@ -1644,6 +1657,7 @@
- 		bh_unlock_sock(sk);
+@@ -1677,6 +1690,7 @@ process:
+ 		NET_INC_STATS_BH(net, LINUX_MIB_TCPBACKLOGDROP);
  		goto discard_and_relse;
  	}
 + 	WEB100_UPDATE_FUNC(tcp_sk(sk), web100_update_cwnd(tcp_sk(sk)));
  	bh_unlock_sock(sk);
  
  	sock_put(sk);
-@@ -1837,6 +1851,16 @@
+@@ -1875,6 +1889,16 @@ static int tcp_v4_init_sock(struct sock *sk)
  	sk->sk_sndbuf = sysctl_tcp_wmem[1];
  	sk->sk_rcvbuf = sysctl_tcp_rmem[1];
  
@@ -2718,7 +2741,7 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_ipv4.c linux-2.6.32-
  	local_bh_disable();
  	percpu_counter_inc(&tcp_sockets_allocated);
  	local_bh_enable();
-@@ -1879,6 +1903,10 @@
+@@ -1917,6 +1941,10 @@ void tcp_v4_destroy_sock(struct sock *sk)
  	if (inet_csk(sk)->icsk_bind_hash)
  		inet_put_port(sk);
  
@@ -2729,10 +2752,11 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_ipv4.c linux-2.6.32-
  	/*
  	 * If sendmsg cached page exists, toss it.
  	 */
-diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_minisocks.c linux-2.6.32-27.planetlab.i686/net/ipv4/tcp_minisocks.c
---- linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_minisocks.c	2011-11-16 16:51:07.414470925 -0500
-+++ linux-2.6.32-27.planetlab.i686/net/ipv4/tcp_minisocks.c	2011-11-16 16:51:06.109471129 -0500
-@@ -337,6 +337,8 @@
+diff --git a/net/ipv4/tcp_minisocks.c b/net/ipv4/tcp_minisocks.c
+index de8398d..f0a6363 100644
+--- a/net/ipv4/tcp_minisocks.c
++++ b/net/ipv4/tcp_minisocks.c
+@@ -333,6 +333,8 @@ void tcp_time_wait(struct sock *sk, int state, int timeo)
  		} while (0);
  #endif
  
@@ -2741,10 +2765,11 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_minisocks.c linux-2.
  		/* Linkage updates. */
  		__inet_twsk_hashdance(tw, sk, &tcp_hashinfo);
  
-diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_output.c linux-2.6.32-27.planetlab.i686/net/ipv4/tcp_output.c
---- linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_output.c	2011-11-16 16:51:07.409470962 -0500
-+++ linux-2.6.32-27.planetlab.i686/net/ipv4/tcp_output.c	2011-11-16 16:51:06.104471116 -0500
-@@ -67,6 +67,7 @@
+diff --git a/net/ipv4/tcp_output.c b/net/ipv4/tcp_output.c
+index d09d921..d9fd7bc 100644
+--- a/net/ipv4/tcp_output.c
++++ b/net/ipv4/tcp_output.c
+@@ -73,6 +73,7 @@ static void tcp_event_new_data_sent(struct sock *sk, struct sk_buff *skb)
  
  	tcp_advance_send_head(sk, skb);
  	tp->snd_nxt = TCP_SKB_CB(skb)->end_seq;
@@ -2752,7 +2777,7 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_output.c linux-2.6.3
  
  	/* Don't override Nagle indefinately with F-RTO */
  	if (tp->frto_counter == 2)
-@@ -260,6 +261,7 @@
+@@ -279,6 +280,7 @@ static u16 tcp_select_window(struct sock *sk)
  	}
  	tp->rcv_wnd = new_win;
  	tp->rcv_wup = tp->rcv_nxt;
@@ -2760,10 +2785,10 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_output.c linux-2.6.3
  
  	/* Make sure we do not exceed the maximum possible
  	 * scaled window.
-@@ -714,11 +716,32 @@
- 	if (after(tcb->end_seq, tp->snd_nxt) || tcb->seq == tcb->end_seq)
+@@ -881,11 +883,33 @@ static int tcp_transmit_skb(struct sock *sk, struct sk_buff *skb, int clone_it,
  		TCP_INC_STATS(sock_net(sk), TCP_MIB_OUTSEGS);
  
+ 	tp->segs_out += tcp_skb_pcount(skb);
 +#ifdef CONFIG_WEB100_STATS
 +	{
 +		/* If the skb isn't cloned, we can't reference it after
@@ -2773,11 +2798,11 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_output.c linux-2.6.3
 +		__u32 seq = TCP_SKB_CB(skb)->seq;
 +		__u32 end_seq = TCP_SKB_CB(skb)->end_seq;
 +		int flags = TCP_SKB_CB(skb)->flags;
-+		
++
 +		err = icsk->icsk_af_ops->queue_xmit(skb, 0);
 +		if (likely(err == 0))
 +			WEB100_UPDATE_FUNC(tp, web100_update_segsend(sk, len, pcount,
-+			                       seq, end_seq, flags));
++						seq, end_seq, flags));
 +	}
 +#else
  	err = icsk->icsk_af_ops->queue_xmit(skb, 0);
@@ -2790,10 +2815,11 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_output.c linux-2.6.3
 +#endif
  	tcp_enter_cwr(sk, 1);
 +	WEB100_VAR_INC(tp, SendStall);
++
  
  	return net_xmit_eval(err);
  }
-@@ -1053,6 +1076,7 @@
+@@ -1219,6 +1243,7 @@ unsigned int tcp_sync_mss(struct sock *sk, u32 pmtu)
  	if (icsk->icsk_mtup.enabled)
  		mss_now = min(mss_now, tcp_mtu_to_mss(sk, icsk->icsk_mtup.search_low));
  	tp->mss_cache = mss_now;
@@ -2801,7 +2827,7 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_output.c linux-2.6.3
  
  	return mss_now;
  }
-@@ -1247,20 +1271,22 @@
+@@ -1413,20 +1438,22 @@ static inline int tcp_snd_wnd_test(struct tcp_sock *tp, struct sk_buff *skb,
   * should be put on the wire right now.  If so, it returns the number of
   * packets allowed by the congestion window.
   */
@@ -2829,7 +2855,7 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_output.c linux-2.6.3
  
  	return cwnd_quota;
  }
-@@ -1272,9 +1298,9 @@
+@@ -1438,9 +1465,9 @@ int tcp_may_send_now(struct sock *sk)
  	struct sk_buff *skb = tcp_send_head(sk);
  
  	return (skb &&
@@ -2841,7 +2867,7 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_output.c linux-2.6.3
  }
  
  /* Trim TSO SKB to LEN bytes, put the remaining data into a new packet
-@@ -1551,6 +1577,7 @@
+@@ -1721,6 +1748,7 @@ static int tcp_write_xmit(struct sock *sk, unsigned int mss_now, int nonagle,
  	unsigned int tso_segs, sent_pkts;
  	int cwnd_quota;
  	int result;
@@ -2849,7 +2875,7 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_output.c linux-2.6.3
  
  	sent_pkts = 0;
  
-@@ -1571,20 +1598,29 @@
+@@ -1741,20 +1769,29 @@ static int tcp_write_xmit(struct sock *sk, unsigned int mss_now, int nonagle,
  		BUG_ON(!tso_segs);
  
  		cwnd_quota = tcp_cwnd_test(tp, skb);
@@ -2882,8 +2908,8 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_output.c linux-2.6.3
 +			}
  		}
  
- 		limit = mss_now;
-@@ -1598,8 +1634,10 @@
+ 		/* TCP Small Queues :
+@@ -1796,8 +1833,10 @@ static int tcp_write_xmit(struct sock *sk, unsigned int mss_now, int nonagle,
  
  		TCP_SKB_CB(skb)->when = tcp_time_stamp;
  
@@ -2895,17 +2921,19 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_output.c linux-2.6.3
  
  		/* Advance the send_head.  This one is sent out.
  		 * This call will increment packets_out.
-@@ -1612,6 +1650,9 @@
+@@ -1810,6 +1849,11 @@ static int tcp_write_xmit(struct sock *sk, unsigned int mss_now, int nonagle,
  		if (push_one)
  			break;
  	}
++
 +	if (why == WC_SNDLIM_NONE)
 +		why = WC_SNDLIM_SENDER;
 +	WEB100_UPDATE_FUNC(tp, web100_update_sndlim(tp, why));
++
+ 	if (inet_csk(sk)->icsk_ca_state == TCP_CA_Recovery)
+ 		tp->prr_out += sent_pkts;
  
- 	if (likely(sent_pkts)) {
- 		tcp_cwnd_validate(sk);
-@@ -1769,6 +1810,9 @@
+@@ -1982,6 +2026,9 @@ u32 __tcp_select_window(struct sock *sk)
  			window = free_space;
  	}
  
@@ -2915,7 +2943,7 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_output.c linux-2.6.3
  	return window;
  }
  
-@@ -2355,6 +2399,7 @@
+@@ -2586,6 +2633,7 @@ static void tcp_connect_init(struct sock *sk)
  	tp->snd_wnd = 0;
  	tcp_init_wl(tp, 0);
  	tp->snd_una = tp->write_seq;
@@ -2923,7 +2951,7 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_output.c linux-2.6.3
  	tp->snd_sml = tp->write_seq;
  	tp->snd_up = tp->write_seq;
  	tp->rcv_nxt = 0;
-@@ -2399,6 +2444,7 @@
+@@ -2633,6 +2681,7 @@ int tcp_connect(struct sock *sk)
  	 * in order to make this packet get counted in tcpOutSegs.
  	 */
  	tp->snd_nxt = tp->write_seq;
@@ -2931,10 +2959,11 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_output.c linux-2.6.3
  	tp->pushed_seq = tp->write_seq;
  	TCP_INC_STATS(sock_net(sk), TCP_MIB_ACTIVEOPENS);
  
-diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_timer.c linux-2.6.32-27.planetlab.i686/net/ipv4/tcp_timer.c
---- linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_timer.c	2011-11-16 16:51:07.413470925 -0500
-+++ linux-2.6.32-27.planetlab.i686/net/ipv4/tcp_timer.c	2011-11-16 16:51:06.108471039 -0500
-@@ -349,6 +349,7 @@
+diff --git a/net/ipv4/tcp_timer.c b/net/ipv4/tcp_timer.c
+index a4191bd..1dffcc7 100644
+--- a/net/ipv4/tcp_timer.c
++++ b/net/ipv4/tcp_timer.c
+@@ -351,6 +351,7 @@ void tcp_retransmit_timer(struct sock *sk)
  		}
  		NET_INC_STATS_BH(sock_net(sk), mib_idx);
  	}
@@ -2942,7 +2971,7 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_timer.c linux-2.6.32
  
  	if (tcp_use_frto(sk)) {
  		tcp_enter_frto(sk);
-@@ -384,6 +385,7 @@
+@@ -386,6 +387,7 @@ void tcp_retransmit_timer(struct sock *sk)
  	 * the 120 second clamps though!
  	 */
  	icsk->icsk_backoff++;
@@ -2950,9 +2979,11 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/tcp_timer.c linux-2.6.32
  	icsk->icsk_retransmits++;
  
  out_reset_timer:
-diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/web100_stats.c linux-2.6.32-27.planetlab.i686/net/ipv4/web100_stats.c
---- linux-2.6.32-27.planetlab.i686.orig/net/ipv4/web100_stats.c	1969-12-31 19:00:00.000000000 -0500
-+++ linux-2.6.32-27.planetlab.i686/net/ipv4/web100_stats.c	2011-11-16 16:51:06.106470968 -0500
+diff --git a/net/ipv4/web100_stats.c b/net/ipv4/web100_stats.c
+new file mode 100644
+index 0000000..bc686e8
+--- /dev/null
++++ b/net/ipv4/web100_stats.c
 @@ -0,0 +1,704 @@
 +/*	
 + * net/ipv4/web100_stats.c
@@ -3658,10 +3689,11 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv4/web100_stats.c linux-2.6
 +EXPORT_SYMBOL(web100_update_cwnd);
 +EXPORT_SYMBOL(web100_update_writeq);
 +#endif
-diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv6/tcp_ipv6.c linux-2.6.32-27.planetlab.i686/net/ipv6/tcp_ipv6.c
---- linux-2.6.32-27.planetlab.i686.orig/net/ipv6/tcp_ipv6.c	2011-11-16 16:51:07.402470961 -0500
-+++ linux-2.6.32-27.planetlab.i686/net/ipv6/tcp_ipv6.c	2011-11-16 17:06:57.467410360 -0500
-@@ -309,6 +309,11 @@
+diff --git a/net/ipv6/tcp_ipv6.c b/net/ipv6/tcp_ipv6.c
+index 2378739..07d1190 100644
+--- a/net/ipv6/tcp_ipv6.c
++++ b/net/ipv6/tcp_ipv6.c
+@@ -301,6 +301,11 @@ static int tcp_v6_connect(struct sock *sk, struct sockaddr *uaddr,
  							     inet->sport,
  							     inet->dport);
  
@@ -3673,7 +3705,7 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv6/tcp_ipv6.c linux-2.6.32-
  	err = tcp_connect(sk);
  	if (err)
  		goto late_failure;
-@@ -1370,6 +1375,13 @@
+@@ -1311,6 +1316,13 @@ static struct sock * tcp_v6_syn_recv_sock(struct sock *sk, struct sk_buff *skb,
  	newsk = tcp_create_openreq_child(sk, req, skb);
  	if (newsk == NULL)
  		goto out_nonewsk;
@@ -3687,23 +3719,23 @@ diff -Naur linux-2.6.32-27.planetlab.i686.orig/net/ipv6/tcp_ipv6.c linux-2.6.32-
  
  	/*
  	 * No need to charge this sock to the relevant IPv6 refcnt debug socks
-@@ -1683,6 +1695,7 @@
- 	skb->dev = NULL;
+@@ -1641,6 +1653,7 @@ process:
  
  	bh_lock_sock_nested(sk);
+ 	tcp_sk(sk)->segs_in += max_t(u16, 1, skb_shinfo(skb)->gso_segs);
 +	WEB100_UPDATE_FUNC(tcp_sk(sk), web100_update_segrecv(tcp_sk(sk), skb));
  	ret = 0;
  	if (!sock_owned_by_user(sk)) {
  #ifdef CONFIG_NET_DMA
-@@ -1701,6 +1714,7 @@
- 		bh_unlock_sock(sk);
+@@ -1661,6 +1674,7 @@ process:
+ 		NET_INC_STATS_BH(net, LINUX_MIB_TCPBACKLOGDROP);
  		goto discard_and_relse;
  	}
 + 	WEB100_UPDATE_FUNC(tcp_sk(sk), web100_update_cwnd(tcp_sk(sk)));
  	bh_unlock_sock(sk);
  
  	sock_put(sk);
-@@ -1881,6 +1895,16 @@
+@@ -1846,6 +1860,16 @@ static int tcp_v6_init_sock(struct sock *sk)
  	sk->sk_sndbuf = sysctl_tcp_wmem[1];
  	sk->sk_rcvbuf = sysctl_tcp_rmem[1];
  
