@@ -677,7 +677,7 @@ Patch21: linux-2.6-690-web100.patch
 # Patch22: linux-2.6-700-bcm5720.patch
 Patch23: linux-2.6-710-xidmask.patch
 # Patch24: linux-2.6-720-undo-rttzero.patch
-# Patch25: linux-2.6-730-cred-fix-kernel-panic-upon-security_file_alloc-failure.patch
+Patch25: linux-2.6-730-cred-fix-kernel-panic-upon-security_file_alloc-failure.patch
 #
 # Patch10000: linux-2.6-10000-gcc-4.5.patch
 # Patch10001: linux-2.6-10001-gcc-4.6-warnoff.patch
@@ -1032,7 +1032,7 @@ ApplyPatch linux-2.6-690-web100.patch
 # ApplyPatch linux-2.6-700-bcm5720.patch
 ApplyPatch linux-2.6-710-xidmask.patch
 # ApplyPatch linux-2.6-720-undo-rttzero.patch
-# ApplyPatch linux-2.6-730-cred-fix-kernel-panic-upon-security_file_alloc-failure.patch
+ApplyPatch linux-2.6-730-cred-fix-kernel-panic-upon-security_file_alloc-failure.patch
 # ApplyPatch linux-2.6-10000-gcc-4.5.patch
 # ApplyPatch linux-2.6-10001-gcc-4.6-warnoff.patch
 # ApplyPatch linux-2.6-10002-gcc-4.6-sense_buffer.patch
