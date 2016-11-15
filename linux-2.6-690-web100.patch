@@ -2766,7 +2766,7 @@ index de8398d..f0a6363 100644
  		__inet_twsk_hashdance(tw, sk, &tcp_hashinfo);
  
 diff --git a/net/ipv4/tcp_output.c b/net/ipv4/tcp_output.c
-index d09d921..d9fd7bc 100644
+index d09d921..857254a 100644
 --- a/net/ipv4/tcp_output.c
 +++ b/net/ipv4/tcp_output.c
 @@ -73,6 +73,7 @@ static void tcp_event_new_data_sent(struct sock *sk, struct sk_buff *skb)
@@ -2797,7 +2797,7 @@ index d09d921..d9fd7bc 100644
 +		int pcount = tcp_skb_pcount(skb);
 +		__u32 seq = TCP_SKB_CB(skb)->seq;
 +		__u32 end_seq = TCP_SKB_CB(skb)->end_seq;
-+		int flags = TCP_SKB_CB(skb)->flags;
++		int flags = TCP_SKB_CB(skb)->tcp_flags;
 +
 +		err = icsk->icsk_af_ops->queue_xmit(skb, 0);
 +		if (likely(err == 0))
@@ -2981,7 +2981,7 @@ index a4191bd..1dffcc7 100644
  out_reset_timer:
 diff --git a/net/ipv4/web100_stats.c b/net/ipv4/web100_stats.c
 new file mode 100644
-index 0000000..bc686e8
+index 0000000..610f0a1
 --- /dev/null
 +++ b/net/ipv4/web100_stats.c
 @@ -0,0 +1,704 @@
@@ -3592,7 +3592,7 @@ index 0000000..bc686e8
 +	}
 +	
 +	/* Check for retransmission. */
-+	if (flags & TCPCB_FLAG_SYN) {
++	if (flags & TCPHDR_SYN) {
 +		if (inet_csk(sk)->icsk_retransmits)
 +			stats->wc_vars.PktsRetrans++;
 +	} else if (before(seq, stats->wc_vars.SndMax)) {
