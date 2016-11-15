@@ -1,7 +1,8 @@
-diff -Ndur linux-2.6.32-700/fs/proc/web100.c linux-2.6.32-700-xidmask/fs/proc/web100.c
---- linux-2.6.32-700/fs/proc/web100.c	2013-01-10 14:18:50.429337747 -0500
-+++ linux-2.6.32-700-xidmask/fs/proc/web100.c	2013-02-06 17:36:52.308961450 -0500
-@@ -427,10 +427,10 @@
+diff --git a/fs/proc/web100.c b/fs/proc/web100.c
+index a88d778..47584b5 100644
+--- a/fs/proc/web100.c
++++ b/fs/proc/web100.c
+@@ -427,10 +427,10 @@ static ssize_t connection_spec_ascii_read(struct file * file, char * buf,
  		local_port = vars->LocalPort;
  		remote_port = vars->RemPort;
  		
@@ -16,7 +17,7 @@ diff -Ndur linux-2.6.32-700/fs/proc/web100.c linux-2.6.32-700-xidmask/fs/proc/we
  	} else {
  		printk(KERN_ERR "connection_spec_ascii_read: LocalAddressType invalid\n");
  		return 0;
-@@ -655,7 +655,8 @@
+@@ -655,7 +655,8 @@ static int get_connection_list(int pos, int *cids, int max)
  	
  	stats = web100stats_first;
  	while (stats && n < max) {
@@ -26,9 +27,10 @@ diff -Ndur linux-2.6.32-700/fs/proc/web100.c linux-2.6.32-700-xidmask/fs/proc/we
  			if (pos <= 0)
  				cids[n++] = stats->wc_cid;
  			else
-diff -Ndur linux-2.6.32-700/include/linux/vserver/context.h linux-2.6.32-700-xidmask/include/linux/vserver/context.h
---- linux-2.6.32-700/include/linux/vserver/context.h	2013-01-10 14:18:49.949337361 -0500
-+++ linux-2.6.32-700-xidmask/include/linux/vserver/context.h	2013-01-19 23:27:42.280655065 -0500
+diff --git a/include/linux/vserver/context.h b/include/linux/vserver/context.h
+index 6238e48..4e24690 100644
+--- a/include/linux/vserver/context.h
++++ b/include/linux/vserver/context.h
 @@ -79,6 +79,7 @@
  #define VXC_KTHREAD		0x01000000
  #define VXC_NAMESPACE		0x02000000
@@ -37,10 +39,11 @@ diff -Ndur linux-2.6.32-700/include/linux/vserver/context.h linux-2.6.32-700-xid
  
  #ifdef	__KERNEL__
  
-diff -Ndur linux-2.6.32-700/include/net/tcp.h linux-2.6.32-700-xidmask/include/net/tcp.h
---- linux-2.6.32-700/include/net/tcp.h	2013-01-10 14:18:49.880337393 -0500
-+++ linux-2.6.32-700-xidmask/include/net/tcp.h	2013-01-19 15:41:28.218337671 -0500
-@@ -251,6 +251,7 @@
+diff --git a/include/net/tcp.h b/include/net/tcp.h
+index 76b18be..ae925db 100644
+--- a/include/net/tcp.h
++++ b/include/net/tcp.h
+@@ -266,6 +266,7 @@ extern int sysctl_WAD_MaxBurst;
  #ifdef CONFIG_WEB100_STATS
  extern int sysctl_web100_fperms;
  extern int sysctl_web100_gid;
@@ -48,10 +51,11 @@ diff -Ndur linux-2.6.32-700/include/net/tcp.h linux-2.6.32-700-xidmask/include/n
  #endif
  
  extern atomic_t tcp_memory_allocated;
-diff -Ndur linux-2.6.32-700/include/net/web100.h linux-2.6.32-700-xidmask/include/net/web100.h
---- linux-2.6.32-700/include/net/web100.h	2013-01-10 14:18:49.874218972 -0500
-+++ linux-2.6.32-700-xidmask/include/net/web100.h	2013-01-19 23:44:09.561660368 -0500
-@@ -46,7 +46,9 @@
+diff --git a/include/net/web100.h b/include/net/web100.h
+index 7ca1b54..4b2714d 100644
+--- a/include/net/web100.h
++++ b/include/net/web100.h
+@@ -46,7 +46,9 @@ extern struct web100stats *web100stats_first;
  extern rwlock_t web100_linkage_lock;
  
  /* For /proc/web100 */
@@ -62,10 +66,11 @@ diff -Ndur linux-2.6.32-700/include/net/web100.h linux-2.6.32-700-xidmask/includ
  
  /* For the TCP code */
  extern int  web100_stats_create(struct sock *sk);
-diff -Ndur linux-2.6.32-700/net/ipv4/sysctl_net_ipv4.c linux-2.6.32-700-xidmask/net/ipv4/sysctl_net_ipv4.c
---- linux-2.6.32-700/net/ipv4/sysctl_net_ipv4.c	2013-01-10 14:18:50.233320698 -0500
-+++ linux-2.6.32-700-xidmask/net/ipv4/sysctl_net_ipv4.c	2013-01-19 15:41:52.767269242 -0500
-@@ -754,6 +754,14 @@
+diff --git a/net/ipv4/sysctl_net_ipv4.c b/net/ipv4/sysctl_net_ipv4.c
+index d80dcd8..0d6af3c 100644
+--- a/net/ipv4/sysctl_net_ipv4.c
++++ b/net/ipv4/sysctl_net_ipv4.c
+@@ -824,6 +824,14 @@ static struct ctl_table ipv4_table[] = {
  		.mode		= 0644,
  		.proc_handler	= &web100_proc_dointvec_update,
  	},
@@ -80,10 +85,11 @@ diff -Ndur linux-2.6.32-700/net/ipv4/sysctl_net_ipv4.c linux-2.6.32-700-xidmask/
  #endif
  	{
  		.ctl_name	= CTL_UNNUMBERED,
-diff -Ndur linux-2.6.32-700/net/ipv4/tcp.c linux-2.6.32-700-xidmask/net/ipv4/tcp.c
---- linux-2.6.32-700/net/ipv4/tcp.c	2013-01-10 14:18:50.234322447 -0500
-+++ linux-2.6.32-700-xidmask/net/ipv4/tcp.c	2013-01-19 15:42:50.975214376 -0500
-@@ -297,6 +297,7 @@
+diff --git a/net/ipv4/tcp.c b/net/ipv4/tcp.c
+index 92fbcc0..7f067a5 100644
+--- a/net/ipv4/tcp.c
++++ b/net/ipv4/tcp.c
+@@ -300,6 +300,7 @@ EXPORT_SYMBOL(sysctl_WAD_MaxBurst);
  #ifdef CONFIG_WEB100_STATS
  int sysctl_web100_fperms = CONFIG_WEB100_FPERMS;
  int sysctl_web100_gid = CONFIG_WEB100_GID;
@@ -91,7 +97,7 @@ diff -Ndur linux-2.6.32-700/net/ipv4/tcp.c linux-2.6.32-700-xidmask/net/ipv4/tcp
  #endif
  
  atomic_t tcp_memory_allocated;	/* Current allocated memory. */
-@@ -848,7 +849,7 @@
+@@ -881,7 +882,7 @@ wait_for_memory:
  		if (copied) {
  			tcp_push(sk, flags & ~MSG_MORE, mss_now, TCP_NAGLE_PUSH);
  #ifdef CONFIG_WEB100_STATS
@@ -100,7 +106,7 @@ diff -Ndur linux-2.6.32-700/net/ipv4/tcp.c linux-2.6.32-700-xidmask/net/ipv4/tcp
  #endif
  		}
  
-@@ -1101,7 +1102,7 @@
+@@ -1134,7 +1135,7 @@ wait_for_memory:
  			if (copied) {
  				tcp_push(sk, flags & ~MSG_MORE, mss_now, TCP_NAGLE_PUSH);
  #ifdef CONFIG_WEB100_STATS
@@ -109,7 +115,7 @@ diff -Ndur linux-2.6.32-700/net/ipv4/tcp.c linux-2.6.32-700-xidmask/net/ipv4/tcp
  #endif
  			}
  
-@@ -1471,7 +1472,7 @@
+@@ -1516,7 +1517,7 @@ int tcp_recvmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
  					tp->rcv_nxt, flags);
  		}
  #ifdef CONFIG_WEB100_STATS
@@ -118,10 +124,11 @@ diff -Ndur linux-2.6.32-700/net/ipv4/tcp.c linux-2.6.32-700-xidmask/net/ipv4/tcp
  #endif
  
  		/* Well, if we have backlog, try to process it now yet. */
-diff -Ndur linux-2.6.32-700/net/ipv4/tcp_input.c linux-2.6.32-700-xidmask/net/ipv4/tcp_input.c
---- linux-2.6.32-700/net/ipv4/tcp_input.c	2013-01-10 14:18:50.232318345 -0500
-+++ linux-2.6.32-700-xidmask/net/ipv4/tcp_input.c	2013-01-10 14:21:16.371337187 -0500
-@@ -3177,7 +3177,7 @@
+diff --git a/net/ipv4/tcp_input.c b/net/ipv4/tcp_input.c
+index ce0a4e0..c7d2624 100644
+--- a/net/ipv4/tcp_input.c
++++ b/net/ipv4/tcp_input.c
+@@ -3281,7 +3281,7 @@ static void tcp_cong_avoid(struct sock *sk, u32 ack, u32 in_flight)
  	}
  	
  #ifdef CONFIG_WEB100_NET100
@@ -130,7 +137,7 @@ diff -Ndur linux-2.6.32-700/net/ipv4/tcp_input.c linux-2.6.32-700-xidmask/net/ip
  		tp->snd_cwnd += vars->WAD_CwndAdjust;
  		vars->WAD_CwndAdjust = 0;
  		tp->snd_cwnd_stamp = tcp_time_stamp;
-@@ -4426,7 +4426,7 @@
+@@ -4619,7 +4619,7 @@ queue_and_out:
  		tcp_fast_path_check(sk);
  
  #ifdef CONFIG_WEB100_STATS
@@ -139,7 +146,7 @@ diff -Ndur linux-2.6.32-700/net/ipv4/tcp_input.c linux-2.6.32-700-xidmask/net/ip
  #endif
  
  		if (eaten > 0)
-@@ -4484,7 +4484,7 @@
+@@ -4680,7 +4680,7 @@ drop:
  		   tp->rcv_nxt, TCP_SKB_CB(skb)->seq, TCP_SKB_CB(skb)->end_seq);
  
  #ifdef CONFIG_WEB100_STATS
@@ -148,7 +155,7 @@ diff -Ndur linux-2.6.32-700/net/ipv4/tcp_input.c linux-2.6.32-700-xidmask/net/ip
  #endif
  	skb_set_owner_r(skb, sk);
  
-@@ -5372,7 +5372,7 @@
+@@ -5566,7 +5566,7 @@ int tcp_rcv_established(struct sock *sk, struct sk_buff *skb,
  			}
  
  #ifdef CONFIG_WEB100_STATS
@@ -157,10 +164,11 @@ diff -Ndur linux-2.6.32-700/net/ipv4/tcp_input.c linux-2.6.32-700-xidmask/net/ip
  #endif
  			tcp_event_data_recv(sk, skb);
  
-diff -Ndur linux-2.6.32-700/net/ipv4/tcp_ipv4.c linux-2.6.32-700-xidmask/net/ipv4/tcp_ipv4.c
---- linux-2.6.32-700/net/ipv4/tcp_ipv4.c	2013-01-10 14:18:50.235319018 -0500
-+++ linux-2.6.32-700-xidmask/net/ipv4/tcp_ipv4.c	2013-01-10 14:21:16.372284450 -0500
-@@ -1383,7 +1383,9 @@
+diff --git a/net/ipv4/tcp_ipv4.c b/net/ipv4/tcp_ipv4.c
+index 8e127c8..5db5bf2 100644
+--- a/net/ipv4/tcp_ipv4.c
++++ b/net/ipv4/tcp_ipv4.c
+@@ -1399,7 +1399,9 @@ struct sock *tcp_v4_syn_recv_sock(struct sock *sk, struct sk_buff *skb,
  		sk_free(newsk);
  		goto exit;
  	}
@@ -171,7 +179,7 @@ diff -Ndur linux-2.6.32-700/net/ipv4/tcp_ipv4.c linux-2.6.32-700-xidmask/net/ipv
  #endif
  
  	newsk->sk_gso_type = SKB_GSO_TCPV4;
-@@ -1857,7 +1859,9 @@
+@@ -1895,7 +1897,9 @@ static int tcp_v4_init_sock(struct sock *sk)
  		if ((err = web100_stats_create(sk))) {
  			return err;
  		}
@@ -182,10 +190,11 @@ diff -Ndur linux-2.6.32-700/net/ipv4/tcp_ipv4.c linux-2.6.32-700-xidmask/net/ipv
  	}
  #endif
  
-diff -Ndur linux-2.6.32-700/net/ipv4/web100_stats.c linux-2.6.32-700-xidmask/net/ipv4/web100_stats.c
---- linux-2.6.32-700/net/ipv4/web100_stats.c	2013-01-10 14:18:50.231318735 -0500
-+++ linux-2.6.32-700-xidmask/net/ipv4/web100_stats.c	2013-02-06 22:25:11.711402213 -0500
-@@ -72,7 +72,99 @@
+diff --git a/net/ipv4/web100_stats.c b/net/ipv4/web100_stats.c
+index 610f0a1..359b56c 100644
+--- a/net/ipv4/web100_stats.c
++++ b/net/ipv4/web100_stats.c
+@@ -72,7 +72,99 @@ static inline int web100stats_hash(int cid)
  	return cid % web100stats_htsize;
  }
  
@@ -286,7 +295,7 @@ diff -Ndur linux-2.6.32-700/net/ipv4/web100_stats.c linux-2.6.32-700-xidmask/net
  {
  	struct web100stats *stats;
  	
-@@ -83,7 +175,10 @@
+@@ -83,7 +175,10 @@ struct web100stats *web100stats_lookup(int cid)
  	stats = web100stats_ht[web100stats_hash(cid)];
  	while (stats && stats->wc_cid != cid)
  		stats = stats->wc_hash_next;
@@ -298,7 +307,7 @@ diff -Ndur linux-2.6.32-700/net/ipv4/web100_stats.c linux-2.6.32-700-xidmask/net
  }
  
  /* This will get really slow as the cid space fills.  This can be done
-@@ -99,7 +194,8 @@
+@@ -99,7 +194,8 @@ static int get_next_cid(void)
  	
  	i = web100stats_next_cid;
  	do {
@@ -308,7 +317,7 @@ diff -Ndur linux-2.6.32-700/net/ipv4/web100_stats.c linux-2.6.32-700-xidmask/net
  			break;
  		i = (i + 1) % WEB100_MAX_CONNS;
  	} while (i != web100stats_next_cid);
-@@ -252,6 +348,12 @@
+@@ -252,6 +348,12 @@ int web100_stats_create(struct sock *sk)
  	struct web100directs *vars;
  	struct tcp_sock *tp = tcp_sk(sk);
  	struct timeval tv;
@@ -321,7 +330,7 @@ diff -Ndur linux-2.6.32-700/net/ipv4/web100_stats.c linux-2.6.32-700-xidmask/net
  	
  	if ((stats = kmalloc(sizeof (struct web100stats), gfp_any())) == NULL)
  		return -ENOMEM;
-@@ -294,6 +396,9 @@
+@@ -294,6 +396,9 @@ int web100_stats_create(struct sock *sk)
  
  void web100_stats_destroy(struct web100stats *stats)
  {
@@ -331,10 +340,11 @@ diff -Ndur linux-2.6.32-700/net/ipv4/web100_stats.c linux-2.6.32-700-xidmask/net
  	/* Attribute final sndlim time. */
  	web100_update_sndlim(tcp_sk(stats->wc_sk), stats->wc_limstate);
  	
-diff -Ndur linux-2.6.32-700/net/ipv6/tcp_ipv6.c linux-2.6.32-700-xidmask/net/ipv6/tcp_ipv6.c
---- linux-2.6.32-700/net/ipv6/tcp_ipv6.c	2013-01-10 14:18:50.219284269 -0500
-+++ linux-2.6.32-700-xidmask/net/ipv6/tcp_ipv6.c	2013-01-10 14:21:16.373337472 -0500
-@@ -1380,7 +1380,9 @@
+diff --git a/net/ipv6/tcp_ipv6.c b/net/ipv6/tcp_ipv6.c
+index 07d1190..3471568 100644
+--- a/net/ipv6/tcp_ipv6.c
++++ b/net/ipv6/tcp_ipv6.c
+@@ -1321,7 +1321,9 @@ static struct sock * tcp_v6_syn_recv_sock(struct sock *sk, struct sk_buff *skb,
  		sk_free(newsk);
  		goto out;
  	}
@@ -345,7 +355,7 @@ diff -Ndur linux-2.6.32-700/net/ipv6/tcp_ipv6.c linux-2.6.32-700-xidmask/net/ipv
  #endif
  
  	/*
-@@ -1901,7 +1903,9 @@
+@@ -1866,7 +1868,9 @@ static int tcp_v6_init_sock(struct sock *sk)
  		if ((err = web100_stats_create(sk))) {
  			return err;
  		}

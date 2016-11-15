@@ -12,7 +12,7 @@ URL: %{SCMURL}
 %define module_version_varname sublevel
 # 646.6.2 borrowed from centos6.8
 %define vs_version 2.3.0.36.29.6
-%define taglevel 642.6.2.vs%{vs_version}.web10027
+%define taglevel 642.6.2.vs%{vs_version}.web10027.xidmask
 
 %define sublevel 33
 
@@ -675,7 +675,7 @@ Patch19: linux-2.6-660-nmi-watchdog-default.patch
 Patch20: linux-2.6-680-htb-hysteresis-tso.patch
 Patch21: linux-2.6-690-web100.patch
 # Patch22: linux-2.6-700-bcm5720.patch
-# Patch23: linux-2.6-710-xidmask.patch
+Patch23: linux-2.6-710-xidmask.patch
 # Patch24: linux-2.6-720-undo-rttzero.patch
 # Patch25: linux-2.6-730-cred-fix-kernel-panic-upon-security_file_alloc-failure.patch
 #
@@ -1030,7 +1030,7 @@ ApplyPatch linux-2.6-660-nmi-watchdog-default.patch
 ApplyPatch linux-2.6-680-htb-hysteresis-tso.patch
 ApplyPatch linux-2.6-690-web100.patch
 # ApplyPatch linux-2.6-700-bcm5720.patch
-# ApplyPatch linux-2.6-710-xidmask.patch
+ApplyPatch linux-2.6-710-xidmask.patch
 # ApplyPatch linux-2.6-720-undo-rttzero.patch
 # ApplyPatch linux-2.6-730-cred-fix-kernel-panic-upon-security_file_alloc-failure.patch
 # ApplyPatch linux-2.6-10000-gcc-4.5.patch
