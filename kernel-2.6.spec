@@ -656,29 +656,29 @@ Source85: config-i686-debug
 Source86: config-powerpc64-debug
 
 #### Planet-Lab ####
-Patch1: patch-2.6.32-642.6.2-vs2.3.0.36.29.6.diff
+#### Patch1: patch-2.6.32-642.6.2-vs2.3.0.36.29.6.diff
 # Patch4: linux-2.6-510-ipod.patch
-Patch5: linux-2.6-521-packet-tagging.patch
-Patch6: linux-2.6-522-iptables-connection-tagging.patch
-Patch7: linux-2.6-523-raw-sockets.patch
-Patch8: linux-2.6-524-peercred.patch
-Patch9: linux-2.6-525-sknid-elevator.patch
-Patch10: linux-2.6-527-iptables-classify-add-mark.patch
+#### Patch5: linux-2.6-521-packet-tagging.patch
+#### Patch6: linux-2.6-522-iptables-connection-tagging.patch
+#### Patch7: linux-2.6-523-raw-sockets.patch
+#### Patch8: linux-2.6-524-peercred.patch
+#### Patch9: linux-2.6-525-sknid-elevator.patch
+#### Patch10: linux-2.6-527-iptables-classify-add-mark.patch
 # Patch11: linux-2.6-530-built-by-support.patch
-Patch12: linux-2.6-550-raise-default-nfile-ulimit.patch
-Patch13: linux-2.6-570-tagxid.patch
-Patch14: linux-2.6-580-show-proc-virt.patch
+#### Patch12: linux-2.6-550-raise-default-nfile-ulimit.patch
+#### Patch13: linux-2.6-570-tagxid.patch
+#### Patch14: linux-2.6-580-show-proc-virt.patch
 # Patch15: linux-2.6-590-dcookies-mm.patch
 # Patch16: linux-2.6-591-chopstix-intern.patch
-Patch17: linux-2.6-640-netlink-audit-hack.patch
-Patch18: linux-2.6-650-hangcheck-reboot.patch
-Patch19: linux-2.6-660-nmi-watchdog-default.patch
-Patch20: linux-2.6-680-htb-hysteresis-tso.patch
-#### Patch21: linux-2.6-690-web100.patch
+#### Patch17: linux-2.6-640-netlink-audit-hack.patch
+#### Patch18: linux-2.6-650-hangcheck-reboot.patch
+#### Patch19: linux-2.6-660-nmi-watchdog-default.patch
+#### Patch20: linux-2.6-680-htb-hysteresis-tso.patch
+#### #### Patch21: linux-2.6-690-web100.patch
 # Patch22: linux-2.6-700-bcm5720.patch
-#### Patch23: linux-2.6-710-xidmask.patch
+#### #### Patch23: linux-2.6-710-xidmask.patch
 # Patch24: linux-2.6-720-undo-rttzero.patch
-#### Patch25: linux-2.6-730-cred-fix-kernel-panic-upon-security_file_alloc-failure.patch
+#### #### Patch25: linux-2.6-730-cred-fix-kernel-panic-upon-security_file_alloc-failure.patch
 #
 # Patch10000: linux-2.6-10000-gcc-4.5.patch
 # Patch10001: linux-2.6-10001-gcc-4.6-warnoff.patch
@@ -1010,30 +1010,30 @@ cp %{SOURCE15} %{SOURCE1} %{SOURCE16} %{SOURCE17} %{SOURCE18} .
 make -f %{SOURCE20} VERSION=%{version} configs
 
 #### Planet-Lab ####
-ApplyPatch patch-2.6.32-642.6.2-vs2.3.0.36.29.6.diff
+#### ApplyPatch patch-2.6.32-642.6.2-vs2.3.0.36.29.6.diff
 # ApplyPatch linux-2.6-510-ipod.patch
-ApplyPatch linux-2.6-521-packet-tagging.patch
-ApplyPatch linux-2.6-522-iptables-connection-tagging.patch
-ApplyPatch linux-2.6-523-raw-sockets.patch
-ApplyPatch linux-2.6-524-peercred.patch
-ApplyPatch linux-2.6-525-sknid-elevator.patch
-ApplyPatch linux-2.6-527-iptables-classify-add-mark.patch
+### ApplyPatch linux-2.6-521-packet-tagging.patch
+### ApplyPatch linux-2.6-522-iptables-connection-tagging.patch
+### ApplyPatch linux-2.6-523-raw-sockets.patch
+### ApplyPatch linux-2.6-524-peercred.patch
+### ApplyPatch linux-2.6-525-sknid-elevator.patch
+### ApplyPatch linux-2.6-527-iptables-classify-add-mark.patch
 # ApplyPatch linux-2.6-530-built-by-support.patch
 # #ApplyPatch linux-2.6-540-oom-kill.patch
-ApplyPatch linux-2.6-550-raise-default-nfile-ulimit.patch
-ApplyPatch linux-2.6-570-tagxid.patch
-ApplyPatch linux-2.6-580-show-proc-virt.patch
+#### ApplyPatch linux-2.6-550-raise-default-nfile-ulimit.patch
+#### ApplyPatch linux-2.6-570-tagxid.patch
+#### ApplyPatch linux-2.6-580-show-proc-virt.patch
 # ApplyPatch linux-2.6-590-dcookies-mm.patch
 # ApplyPatch linux-2.6-591-chopstix-intern.patch
-ApplyPatch linux-2.6-640-netlink-audit-hack.patch
-ApplyPatch linux-2.6-650-hangcheck-reboot.patch
-ApplyPatch linux-2.6-660-nmi-watchdog-default.patch
-ApplyPatch linux-2.6-680-htb-hysteresis-tso.patch
-#### ApplyPatch linux-2.6-690-web100.patch
+#### ApplyPatch linux-2.6-640-netlink-audit-hack.patch
+#### ApplyPatch linux-2.6-650-hangcheck-reboot.patch
+#### ApplyPatch linux-2.6-660-nmi-watchdog-default.patch
+#### ApplyPatch linux-2.6-680-htb-hysteresis-tso.patch
+#### #### ApplyPatch linux-2.6-690-web100.patch
 # ApplyPatch linux-2.6-700-bcm5720.patch
-#### ApplyPatch linux-2.6-710-xidmask.patch
+#### #### ApplyPatch linux-2.6-710-xidmask.patch
 # ApplyPatch linux-2.6-720-undo-rttzero.patch
-#### ApplyPatch linux-2.6-730-cred-fix-kernel-panic-upon-security_file_alloc-failure.patch
+#### #### ApplyPatch linux-2.6-730-cred-fix-kernel-panic-upon-security_file_alloc-failure.patch
 # ApplyPatch linux-2.6-10000-gcc-4.5.patch
 # ApplyPatch linux-2.6-10001-gcc-4.6-warnoff.patch
 # ApplyPatch linux-2.6-10002-gcc-4.6-sense_buffer.patch
