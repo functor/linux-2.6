@@ -13,7 +13,7 @@ URL: %{SCMURL}
 # 646.6.2 borrowed from centos6.8
 %define vs_version 2.3.0.36.29.6
 ### %define taglevel 642.6.2.vs%{vs_version}.web10027.xidmask
-%define taglevel 642.6.2
+%define taglevel 642.6.2.v32
 
 %define sublevel 33
 
@@ -657,6 +657,7 @@ Source86: config-powerpc64-debug
 
 #### Planet-Lab ####
 ### Patch1: patch-2.6.32-642.6.2-vs2.3.0.36.29.6.diff
+Patch3: linux-2.6-500-mlx4-32bit-fix.patch
 # Patch4: linux-2.6-510-ipod.patch
 ### Patch5: linux-2.6-521-packet-tagging.patch
 ### Patch6: linux-2.6-522-iptables-connection-tagging.patch
@@ -1011,6 +1012,7 @@ make -f %{SOURCE20} VERSION=%{version} configs
 
 #### Planet-Lab ####
 ### ApplyPatch patch-2.6.32-642.6.2-vs2.3.0.36.29.6.diff
+ApplyPatch linux-2.6-500-mlx4-32bit-fix.patch
 # ApplyPatch linux-2.6-510-ipod.patch
 ### ApplyPatch linux-2.6-521-packet-tagging.patch
 ### ApplyPatch linux-2.6-522-iptables-connection-tagging.patch
