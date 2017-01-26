@@ -214,10 +214,10 @@ index f84ed68..dac3e7b 100644
  static int proc_root_getattr(struct vfsmount *mnt, struct dentry *dentry, struct kstat *stat
 diff --git a/fs/proc/web100.c b/fs/proc/web100.c
 new file mode 100644
-index 0000000..a88d778
+index 0000000..6babde3
 --- /dev/null
 +++ b/fs/proc/web100.c
-@@ -0,0 +1,1368 @@
+@@ -0,0 +1,1375 @@
 +/*  
 + *  fs/proc/web100.c
 + *  
@@ -954,12 +954,19 @@ index 0000000..a88d778
 +static inline struct dentry *web100_dir_dent(void)
 +{
 +	struct qstr qstr;
++	struct pid_namespace *ns;
++
++	if ((ns = task_active_pid_ns(current)) == NULL)
++		return NULL;
++
++	if (ns->proc_mnt == NULL)
++		return NULL;
 +	
 +	qstr.name = "web100";
 +	qstr.len = 6;
 +	qstr.hash = full_name_hash(qstr.name, qstr.len);
-+	
-+	return d_lookup(proc_mnt->mnt_sb->s_root, &qstr);
++
++	return d_lookup(ns->proc_mnt->mnt_sb->s_root, &qstr);
 +}
 +
 +void web100_proc_nlink_update(nlink_t nlink)
