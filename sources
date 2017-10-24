@@ -1,2 +1,2 @@
-3a36fb48fbc1ca87402bf22129070d030f3cce20  http://vault.centos.org/6.8/updates/Source/SPackages/kernel-2.6.32-642.6.2.el6.src.rpm
-a001d810e07f12909a2d66758a94b6b367d64e37  https://raw.githubusercontent.com/functor/planetlab-third-party/master/patch-2.6.32-642.6.2-vs2.3.0.36.29.6.diff
+0a999b64065199176994170b15fa3dfe7fbff7c8 http://vault.centos.org/6.8/updates/Source/SPackages/kernel-2.6.32-642.6.2.el6.src.rpm
+a001d810e07f12909a2d66758a94b6b367d64e37 https://raw.githubusercontent.com/functor/planetlab-third-party/master/patch-2.6.32-642.6.2-vs2.3.0.36.29.6.diff
